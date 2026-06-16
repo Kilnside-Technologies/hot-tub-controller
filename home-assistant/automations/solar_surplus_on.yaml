@@ -1,0 +1,71 @@
+# Solar surplus -> hot tub ON
+#
+# Drop into a packages: file, or copy into automations.yaml under the
+# automation: list. Entity IDs below assume the ESPHome device name
+# `hot-tub` (so HA entities become `hot_tub_*`) and a Shelly EM Gen3 named
+# `hot_tub_contactor` for its switch entity.
+#
+# CONFIRM these against your install before enabling:
+#   - sensor.solis_grid_exported_power   (Solis MQTT/Modbus integration)
+#   - switch.hot_tub_contactor           (Shelly EM Gen3 relay)
+#   - climate.hot_tub_climate            (this repo's ESPHome device)
+#   - sensor.hot_tub_water_temperature   (this repo's ESPHome device)
+
+- id: hot_tub_solar_surplus_on
+  alias: "Hot Tub: solar surplus ON"
+  description: >
+    Energise the hot tub contactor and ramp target to 38 °C when the Solis
+    is exporting >2 kW for 5 minutes during peak solar hours and the water
+    is below 38 °C.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.solis_grid_exported_power
+      above: 2000
+      # Sustained 5 min — only fire when surplus is real, not a cloud-edge spike.
+      for:
+        minutes: 5
+
+  condition:
+    # Don't reheat if already hot.
+    - condition: numeric_state
+      entity_id: sensor.hot_tub_water_temperature
+      below: 38
+    # Don't try to engage if the contactor is already on (idempotency).
+    - condition: state
+      entity_id: switch.hot_tub_contactor
+      state: "off"
+    # Peak solar window only — outside this, surplus is unlikely to last.
+    - condition: time
+      after: "08:00:00"
+      before: "18:00:00"
+
+  action:
+    # 1. Energise mains supply to the tub.
+    - service: switch.turn_on
+      target:
+        entity_id: switch.hot_tub_contactor
+
+    # 2. Give the Balboa board time to boot, settle the RS485 bus, and let the
+    #    ESP32 reconnect to HA before issuing climate commands.
+    - delay:
+        seconds: 30
+
+    # 3. Set target temp. Climate platform takes °C since we pinned spa_temp_scale: C.
+    - service: climate.set_temperature
+      target:
+        entity_id: climate.hot_tub_climate
+      data:
+        temperature: 38
+        hvac_mode: heat
+
+    # 4. Notify (templated so the message is useful in logs).
+    - service: notify.notify
+      data:
+        title: "Hot tub: heating from solar"
+        message: >
+          Solar export {{ states('sensor.solis_grid_exported_power') }} W,
+          water at {{ states('sensor.hot_tub_water_temperature') }} °C.
+          Target 38 °C.

@@ -1,0 +1,100 @@
+# Hot tub pre-heat script
+#
+# Compute when to start heating so the tub reaches `target_temp` by
+# `ready_by_time`, based on:
+#   - current water temperature (sensor.hot_tub_water_temperature)
+#   - 3 kW Incoloy heater element (GS501Z)
+#   - heating rate ≈ 1 °C per 12 min per 1000 L
+#
+# CONFIRM: set `tub_volume_l` in the variables block below to your actual
+# tub volume. The default is a placeholder — most domestic 5–6 seat tubs
+# are 1100–1500 L; refer to the tub manual.
+#
+# Usage from HA UI:
+#   service: script.hot_tub_preheat
+#   data:
+#     target_temp: 38
+#     ready_by_time: "18:30:00"
+
+hot_tub_preheat:
+  alias: "Hot Tub: pre-heat for time"
+  description: >
+    Start heating at the calculated time to reach target_temp by ready_by_time.
+    Single-mode: re-invoking cancels any pending pre-heat in progress.
+  mode: single
+  fields:
+    target_temp:
+      description: "Target water temperature in °C (10–40)."
+      example: 38
+      required: true
+      selector:
+        number:
+          min: 10
+          max: 40
+          step: 0.5
+          unit_of_measurement: "°C"
+    ready_by_time:
+      description: "Time the tub should be at target (HH:MM:SS, today or tomorrow)."
+      example: "18:30:00"
+      required: true
+      selector:
+        time:
+
+  variables:
+    # PLACEHOLDER — set to your actual tub volume in litres.
+    tub_volume_l: 1300
+    # Heating rate model: 1 °C per 12 min per 1000 L => minutes per °C scales linearly.
+    minutes_per_degree: "{{ (12 * (tub_volume_l / 1000)) | float }}"
+    current_temp: "{{ states('sensor.hot_tub_water_temperature') | float(default=20) }}"
+    delta_c: "{{ [(target_temp | float) - current_temp, 0] | max }}"
+    heat_minutes: "{{ (delta_c * (minutes_per_degree | float)) | round(0, 'ceil') }}"
+
+  sequence:
+    # 1. Log the plan so it's visible in HA logbook before we wait.
+    - service: system_log.write
+      data:
+        level: info
+        message: >
+          Hot tub pre-heat plan: current {{ current_temp }} °C,
+          target {{ target_temp }} °C, delta {{ delta_c }} °C,
+          tub volume {{ tub_volume_l }} L, rate {{ minutes_per_degree }} min/°C
+          => heat for {{ heat_minutes }} min, ready by {{ ready_by_time }}.
+
+    # 2. If already at/above target, just notify and exit.
+    - choose:
+        - conditions: "{{ delta_c | float == 0 }}"
+          sequence:
+            - service: notify.notify
+              data:
+                title: "Hot tub: already up to temperature"
+                message: "Current {{ current_temp }} °C ≥ target {{ target_temp }} °C. No pre-heat needed."
+            - stop: "Already at temp"
+
+    # 3. Wait until ready_by_time minus heat_minutes (clamped to "now or later").
+    - wait_template: >
+        {% set ready = today_at(ready_by_time) %}
+        {% if ready < now() %}{% set ready = ready + timedelta(days=1) %}{% endif %}
+        {% set start = ready - timedelta(minutes=heat_minutes | int) %}
+        {{ now() >= start }}
+      # Safety cap: don't sit waiting more than 24 h.
+      timeout: "24:00:00"
+      continue_on_timeout: false
+
+    # 4. Engage contactor and set climate.
+    - service: switch.turn_on
+      target:
+        entity_id: switch.hot_tub_contactor
+    - delay:
+        seconds: 30
+    - service: climate.set_temperature
+      target:
+        entity_id: climate.hot_tub_climate
+      data:
+        temperature: "{{ target_temp }}"
+        hvac_mode: heat
+    - service: notify.notify
+      data:
+        title: "Hot tub: pre-heating"
+        message: >
+          Started pre-heat at {{ now().strftime('%H:%M') }} —
+          target {{ target_temp }} °C by {{ ready_by_time }}.

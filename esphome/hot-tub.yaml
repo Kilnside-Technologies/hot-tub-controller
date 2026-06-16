@@ -1,0 +1,185 @@
+# Balboa GS501Z hot tub controller — ESPHome config
+#
+# Hardware:
+#   - ESP32 WROOM-32E dev board
+#   - JZK TTL <-> RS485 module (auto flow control, 3.3 V / 5 V tolerant)
+#   - 12 V tap from Balboa J2 RJ45, stepped to 5 V via LM2596 buck
+#
+# RS485 component & protocol:
+#   github://brianfeucht/esphome-balboa-spa
+#   (which in turn derives from ccutrer/balboa_worldwide_app)
+#
+# NOTE: spa_temp_scale must be C for UK installation. The Balboa board has
+# a separate F/C setting that needs to match — verify on the topside panel
+# during commissioning (docs/commissioning.md step 4).
+
+substitutions:
+  device_name: hot-tub
+  device_friendly: "Hot Tub"
+  # Match existing MQTT broker convention used elsewhere in this HA install.
+  # CONFIRM: cross-check against your broker's topic tree before flashing.
+  mqtt_prefix: "home/hot_tub"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${device_friendly}
+  comment: "Balboa GS501Z bridge — see github.com/.../hot-tub-controller"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# ---------------------------------------------------------------------------
+# Connectivity
+# ---------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Hot tub cabinet is metal-lined; if signal is weak, fall back to AP for
+  # rescue/reconfig rather than getting stuck in a reboot loop.
+  ap:
+    ssid: "${device_name}-fallback"
+    password: !secret ota_password
+  power_save_mode: none  # RS485 stream is continuous; don't let WiFi nap.
+
+captive_portal:
+
+# Native HA API (encrypted) — primary control path.
+api:
+  encryption:
+    key: !secret api_key
+
+# MQTT — secondary/observability path; matches existing broker convention.
+# Topics: ${mqtt_prefix}/<entity>/state, etc.
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: ${mqtt_prefix}
+  discovery: false   # HA gets entities via the api: block above; MQTT is for external consumers.
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ---------------------------------------------------------------------------
+# Logging — INFO + telnet logger for in-cabinet debugging
+# ---------------------------------------------------------------------------
+# The tub cabinet is awkward to crack open; expose logs over the network so
+# you can `nc <ip> 23` from indoors during teething troubles.
+logger:
+  level: INFO
+  baud_rate: 0   # Free up USB UART; we need GPIO1/3 free for stability.
+
+# Telnet log stream on :23 (community pattern; comment out once stable)
+# CONFIRM: the `streaming_logger` external component is the usual way to get
+# telnet logs in ESPHome — adjust source if upstream renamed it.
+# external_components:
+#   - source: github://oxan/esphome-stream-server
+# stream_server:
+#   uart_id: spa_uart
+#   port: 23
+
+# ---------------------------------------------------------------------------
+# UART <-> RS485 (TTL side of the JZK module)
+# ---------------------------------------------------------------------------
+# Pin mapping — CONFIRM against the actual wiring once the board is in place:
+#   ESP32 GPIO17 (TX)  ->  JZK TXD (TTL side)
+#   ESP32 GPIO16 (RX)  <-  JZK RXD (TTL side)
+#   ESP32 5V           ->  JZK VCC
+#   ESP32 GND          ->  JZK GND
+# JZK RS485 side: A+ and B- go to the matching pins on Balboa J2.
+uart:
+  id: spa_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 115200
+  rx_buffer_size: 512   # Balboa frames are short but bursty; 512 is the
+                        # buffer size recommended in brianfeucht's README.
+
+# ---------------------------------------------------------------------------
+# Balboa Spa component
+# ---------------------------------------------------------------------------
+# Component source: github://brianfeucht/esphome-balboa-spa
+# CONFIRM: this YAML matches the component's current API. The component is
+# still moving; if `esphome compile` complains about unknown keys, check the
+# component README for the canonical example.
+external_components:
+  - source: github://brianfeucht/esphome-balboa-spa
+    components: [balboa_spa]
+
+balboa_spa:
+  id: spa
+  uart_id: spa_uart
+  spa_temp_scale: C   # UK install — keep this C even if the topside is in F.
+
+# ---------------------------------------------------------------------------
+# Entities — all prefixed `hot_tub_` for HA tidiness
+# ---------------------------------------------------------------------------
+climate:
+  - platform: balboa_spa
+    spa_id: spa
+    name: "Hot Tub Climate"
+    id: hot_tub_climate
+    # Range capped to protect both the tub (>40 °C scalding risk for kids) and
+    # the heater contactor (we don't want a runaway).
+    visual:
+      min_temperature: 10 °C
+      max_temperature: 40 °C
+      temperature_step: 0.5 °C
+
+sensor:
+  - platform: balboa_spa
+    spa_id: spa
+    temperature:
+      name: "Hot Tub Water Temperature"
+      id: hot_tub_water_temperature
+      # Balboa pushes updates often; throttle to 30 s for HA / history graph.
+      filters:
+        - throttle: 30s
+  # Diagnostics
+  - platform: wifi_signal
+    name: "Hot Tub WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Hot Tub Uptime"
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: balboa_spa
+    spa_id: spa
+    heater_active:
+      name: "Hot Tub Heater Active"
+      id: hot_tub_heater_active
+    filter_cycle:
+      name: "Hot Tub Filter Cycle"
+      id: hot_tub_filter_cycle
+
+switch:
+  - platform: balboa_spa
+    spa_id: spa
+    pump1:
+      name: "Hot Tub Pump 1"
+      id: hot_tub_pump1
+    # GS501Z exposes jets via the same pump channel on single-pump configs;
+    # if your board reports a second pump, rename this accordingly.
+    jets1:
+      name: "Hot Tub Jets 1"
+      id: hot_tub_jets1
+    light:
+      name: "Hot Tub Lights"
+      id: hot_tub_lights
+
+# ---------------------------------------------------------------------------
+# Diagnostics — text sensors (numeric ones are folded into the sensor: block above)
+# ---------------------------------------------------------------------------
+text_sensor:
+  - platform: version
+    name: "Hot Tub ESPHome Version"
+    entity_category: diagnostic
+  - platform: wifi_info
+    ip_address:
+      name: "Hot Tub IP Address"
+      entity_category: diagnostic
