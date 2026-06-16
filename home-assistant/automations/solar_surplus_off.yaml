@@ -1,0 +1,52 @@
+# Solar surplus -> hot tub OFF
+#
+# Pair to solar_surplus_on.yaml. Drop target to the climate minimum first
+# (so the heater stops drawing before we cut mains, avoiding contactor
+# arcing under load), wait, then de-energise the contactor.
+
+- id: hot_tub_solar_surplus_off
+  alias: "Hot Tub: solar surplus OFF"
+  description: >
+    Stand the tub down when Solis export drops below 500 W for 10 minutes.
+    Drops target to 10 °C (stop heating) before opening the contactor.
+  mode: single
+  max_exceeded: silent
+
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.solis_grid_exported_power
+      below: 500
+      for:
+        minutes: 10
+
+  condition:
+    # Only act if the tub is currently energised by us.
+    - condition: state
+      entity_id: switch.hot_tub_contactor
+      state: "on"
+
+  action:
+    # 1. Tell the Balboa to stop heating. This cuts the 3 kW element draw
+    #    *before* we open the contactor, so the contacts open dry.
+    - service: climate.set_temperature
+      target:
+        entity_id: climate.hot_tub_climate
+      data:
+        temperature: 10
+        hvac_mode: heat
+
+    # 2. Wait for heater to finish its in-flight cycle and the Balboa to settle.
+    - delay:
+        minutes: 2
+
+    # 3. Drop mains.
+    - service: switch.turn_off
+      target:
+        entity_id: switch.hot_tub_contactor
+
+    - service: notify.notify
+      data:
+        title: "Hot tub: standing down"
+        message: >
+          Solar export dropped to {{ states('sensor.solis_grid_exported_power') }} W.
+          Final water temp {{ states('sensor.hot_tub_water_temperature') }} °C.

@@ -1,0 +1,70 @@
+# Lovelace card for the hot tub view.
+#
+# Drop this into a `cards:` list on an existing Lovelace view, or wrap as a
+# standalone view in your dashboard YAML. Entity IDs assume:
+#   - ESPHome device `hot-tub` => sensor.hot_tub_water_temperature, etc.
+#   - Shelly EM Gen3 named `hot_tub_em` => sensor.hot_tub_em_power, sensor.hot_tub_em_energy
+#   - Solis integration => sensor.solis_grid_exported_power
+# CONFIRM all entity IDs against your install.
+
+type: vertical-stack
+cards:
+  # Current water temperature — at-a-glance gauge.
+  - type: gauge
+    entity: sensor.hot_tub_water_temperature
+    name: Water temperature
+    unit: "°C"
+    min: 20
+    max: 42
+    needle: true
+    severity:
+      green: 0      # < 36 °C  - cool / heating
+      yellow: 36    # 36–40 °C - sweet spot
+      red: 40       # > 40 °C  - hot / cap
+
+  # Target temperature & mode.
+  - type: thermostat
+    entity: climate.hot_tub_climate
+    name: Hot tub target
+
+  # Live state — pumps, jets, lights, heater, filter.
+  - type: glance
+    title: State
+    show_state: true
+    columns: 5
+    entities:
+      - entity: binary_sensor.hot_tub_heater_active
+        name: Heater
+      - entity: switch.hot_tub_pump1
+        name: Pump
+      - entity: switch.hot_tub_jets1
+        name: Jets
+      - entity: switch.hot_tub_lights
+        name: Lights
+      - entity: binary_sensor.hot_tub_filter_cycle
+        name: Filter
+
+  # Power & energy + contactor + solar export context.
+  - type: entities
+    title: Power
+    state_color: true
+    entities:
+      - entity: sensor.hot_tub_em_power
+        name: Current power
+      - entity: sensor.hot_tub_em_energy
+        name: Today's energy
+      - entity: sensor.solis_grid_exported_power
+        name: Solar export
+      - type: divider
+      - entity: switch.hot_tub_contactor
+        name: Mains contactor
+        secondary_info: last-changed
+
+  # 24 h water temp trend.
+  - type: history-graph
+    title: Water temperature (24 h)
+    hours_to_show: 24
+    refresh_interval: 60
+    entities:
+      - entity: sensor.hot_tub_water_temperature
+        name: Water

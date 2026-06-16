@@ -1,0 +1,25 @@
+# ESPHome local state
+esphome/secrets.yaml
+esphome/.esphome/
+esphome/.pioenvs/
+esphome/.piolibdeps/
+
+# Build artifacts
+*.bin
+*.elf
+*.map
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python (if scripts are added later)
+__pycache__/
+*.pyc
+.venv/
