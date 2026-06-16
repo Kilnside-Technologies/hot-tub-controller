@@ -27,7 +27,7 @@ cards:
     entity: climate.hot_tub_climate
     name: Hot tub target
 
-  # Live state — pumps, jets, lights, heater, filter.
+  # Live state — pump, light, heater, circulation, filter.
   - type: glance
     title: State
     show_state: true
@@ -37,11 +37,11 @@ cards:
         name: Heater
       - entity: switch.hot_tub_pump1
         name: Pump
-      - entity: switch.hot_tub_jets1
-        name: Jets
       - entity: switch.hot_tub_lights
         name: Lights
-      - entity: binary_sensor.hot_tub_filter_cycle
+      - entity: binary_sensor.hot_tub_circulation
+        name: Circ.
+      - entity: binary_sensor.hot_tub_filter_cycle_1
         name: Filter
 
   # Power & energy + contactor + solar export context.
