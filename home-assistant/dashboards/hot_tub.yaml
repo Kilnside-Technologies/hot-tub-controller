@@ -35,11 +35,11 @@ cards:
     entities:
       - entity: binary_sensor.hot_tub_heater_active
         name: Heater
-      - entity: switch.hot_tub_pump1
+      - entity: switch.hot_tub_pump_1
         name: Pump
       - entity: switch.hot_tub_lights
         name: Lights
-      - entity: binary_sensor.hot_tub_circulation
+      - entity: binary_sensor.hot_tub_circulation_pump
         name: Circ.
       - entity: binary_sensor.hot_tub_filter_cycle_1
         name: Filter
