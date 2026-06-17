@@ -1,0 +1,27 @@
+# Template sensor exposing the Cabin Hot Tub water temperature as a regular
+# `sensor.` entity, sourced from the climate entity's current_temperature
+# attribute. The brianfeucht ESPHome component does NOT expose water temp
+# as a standalone sensor — only via the climate entity — so this bridges
+# the gap for things that want a sensor: gauges, history graphs, energy
+# dashboard stats, numeric_state automation triggers, etc.
+#
+# Drop into a `template:` block in configuration.yaml, or in a packages/
+# file. If you already have a `template:` block, merge the `- sensor:` list
+# under it rather than declaring `template:` twice.
+
+template:
+  - sensor:
+      - name: "Cabin Hot Tub Water Temperature"
+        unique_id: cabin_hot_tub_water_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        # current_temperature is reported as a float by the balboa_spa
+        # climate platform once the RS485 bus is up. While the bus is
+        # disconnected the attribute is null — let availability gate so HA
+        # shows the sensor as unavailable rather than "unknown".
+        availability: >
+          {{ state_attr('climate.cabin_hot_tub_climate', 'current_temperature')
+             is not none }}
+        state: >
+          {{ state_attr('climate.cabin_hot_tub_climate', 'current_temperature') }}

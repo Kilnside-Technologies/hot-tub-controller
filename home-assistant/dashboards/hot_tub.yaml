@@ -2,8 +2,11 @@
 #
 # Drop this into a `cards:` list on an existing Lovelace view, or wrap as a
 # standalone view in your dashboard YAML. Entity IDs assume:
-#   - ESPHome device `hot-tub` => sensor.hot_tub_water_temperature, etc.
-#   - Shelly EM Gen3 named `hot_tub_em` => sensor.hot_tub_em_power, sensor.hot_tub_em_energy
+#   - ESPHome device `hot-tub` renamed in HA to "Cabin Hot Tub" => entities
+#     prefixed `cabin_hot_tub_*`. sensor.cabin_hot_tub_water_temperature is
+#     the template sensor defined in ../sensors/hot_tub.yaml (the ESPHome
+#     balboa_spa component doesn't expose water temp natively).
+#   - Shelly EM Gen3 named `hot_tub_em` => sensor.hot_tub_em_power, _energy
 #   - Solis integration => sensor.solis_grid_exported_power
 # CONFIRM all entity IDs against your install.
 
@@ -11,7 +14,7 @@ type: vertical-stack
 cards:
   # Current water temperature — at-a-glance gauge.
   - type: gauge
-    entity: sensor.hot_tub_water_temperature
+    entity: sensor.cabin_hot_tub_water_temperature
     name: Water temperature
     unit: "°C"
     min: 20
@@ -24,7 +27,7 @@ cards:
 
   # Target temperature & mode.
   - type: thermostat
-    entity: climate.hot_tub_climate
+    entity: climate.cabin_hot_tub_climate
     name: Hot tub target
 
   # Live state — pump, light, heater, circulation, filter.
@@ -33,15 +36,15 @@ cards:
     show_state: true
     columns: 5
     entities:
-      - entity: binary_sensor.hot_tub_heater_active
+      - entity: binary_sensor.cabin_hot_tub_heater_active
         name: Heater
-      - entity: switch.hot_tub_pump_1
+      - entity: switch.cabin_hot_tub_pump_1
         name: Pump
-      - entity: switch.hot_tub_lights
+      - entity: light.cabin_hot_tub_lights
         name: Lights
-      - entity: binary_sensor.hot_tub_circulation_pump
+      - entity: binary_sensor.cabin_hot_tub_circulation_pump
         name: Circ.
-      - entity: binary_sensor.hot_tub_filter_cycle_1
+      - entity: binary_sensor.cabin_hot_tub_filter_cycle_1
         name: Filter
 
   # Power & energy + contactor + solar export context.
@@ -66,5 +69,5 @@ cards:
     hours_to_show: 24
     refresh_interval: 60
     entities:
-      - entity: sensor.hot_tub_water_temperature
+      - entity: sensor.cabin_hot_tub_water_temperature
         name: Water

@@ -2,7 +2,7 @@
 #
 # Compute when to start heating so the tub reaches `target_temp` by
 # `ready_by_time`, based on:
-#   - current water temperature (sensor.hot_tub_water_temperature)
+#   - current water temperature (sensor.cabin_hot_tub_water_temperature)
 #   - 3 kW Incoloy heater element (GS501Z)
 #   - heating rate ≈ 1 °C per 12 min per 1000 L
 #
@@ -45,7 +45,7 @@ hot_tub_preheat:
     tub_volume_l: 1300
     # Heating rate model: 1 °C per 12 min per 1000 L => minutes per °C scales linearly.
     minutes_per_degree: "{{ (12 * (tub_volume_l / 1000)) | float }}"
-    current_temp: "{{ states('sensor.hot_tub_water_temperature') | float(default=20) }}"
+    current_temp: "{{ states('sensor.cabin_hot_tub_water_temperature') | float(default=20) }}"
     delta_c: "{{ [(target_temp | float) - current_temp, 0] | max }}"
     heat_minutes: "{{ (delta_c * (minutes_per_degree | float)) | round(0, 'ceil') }}"
 
@@ -88,7 +88,7 @@ hot_tub_preheat:
         seconds: 30
     - service: climate.set_temperature
       target:
-        entity_id: climate.hot_tub_climate
+        entity_id: climate.cabin_hot_tub_climate
       data:
         temperature: "{{ target_temp }}"
         hvac_mode: heat

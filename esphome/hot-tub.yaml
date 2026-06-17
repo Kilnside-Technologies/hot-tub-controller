@@ -15,7 +15,11 @@
 
 substitutions:
   device_name: hot-tub
-  device_friendly: "Hot Tub"
+  # Friendly name was renamed in HA UI to "Cabin Hot Tub" (the tub lives in
+  # the cabin). Keep YAML in sync so future reflashes don't fight the UI.
+  # Don't change device_name (esphome.name) — that's the OTA/mDNS identifier
+  # and changing it would force re-registration.
+  device_friendly: "Cabin Hot Tub"
   # Match existing MQTT broker convention used elsewhere in this HA install.
   # CONFIRM: cross-check against your broker's topic tree before flashing.
   mqtt_prefix: "home/hot_tub"
@@ -122,12 +126,19 @@ balboa_spa:
   uart_id: spa_uart
   spa_temp_scale: C   # UK install — keep this C even if the topside is in F.
 
+# Required time source for filter scheduling + the sync_time button. HA
+# pushes its (NTP-disciplined) clock to the ESP, which then pushes it on
+# to the Balboa RTC when sync_time is pressed.
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
 # ---------------------------------------------------------------------------
 # Entities — all prefixed `hot_tub_` for HA tidiness
 # ---------------------------------------------------------------------------
 climate:
   - platform: balboa_spa
-    spa_id: spa
+    balboa_spa_id: spa
     name: "Climate"
     id: hot_tub_climate
     # Range capped to protect both the tub (>40 °C scalding risk for kids) and
@@ -137,16 +148,15 @@ climate:
       max_temperature: 40 °C
       temperature_step: 0.5 °C
 
+# Water temperature is exposed via the climate entity's current_temperature
+# attribute — the balboa_spa sensor platform does NOT expose a separate
+# `temperature:` key. For dashboard gauges/history graphs you'll want a
+# template sensor in HA that reads climate.hot_tub_climate's current_temp
+# attribute. See home-assistant/sensors/hot_tub.yaml.
 sensor:
-  - platform: balboa_spa
-    spa_id: spa
-    temperature:
-      name: "Water Temperature"
-      id: hot_tub_water_temperature
-      # Balboa pushes updates often; throttle to 30 s for HA / history graph.
-      filters:
-        - throttle: 30s
-  # Diagnostics
+  # Diagnostics only — the balboa_spa platform sensors (blower, heatstate,
+  # fault counters etc.) are intentionally omitted; their values are surfaced
+  # more usefully via the binary_sensor and text_sensor blocks below.
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 60s
@@ -157,10 +167,12 @@ sensor:
 
 binary_sensor:
   - platform: balboa_spa
-    spa_id: spa
+    balboa_spa_id: spa
     # Heater relay state — read-only; the Balboa board owns this and only
     # fires when (a) target > current temp AND (b) it's not in safety lockout.
-    heater_active:
+    # Schema key is `heatstate`; friendly name "Heater Active" preserves the
+    # HA entity_id `binary_sensor.hot_tub_heater_active`.
+    heatstate:
       name: "Heater Active"
       id: hot_tub_heater_active
     # Filter cycle 1 *currently running* (vs. just scheduled).
@@ -194,13 +206,21 @@ binary_sensor:
 
 switch:
   - platform: balboa_spa
-    spa_id: spa
-    # GS501Z is a single-pump board: pump1 drives the jets. There is no
-    # separate "jets" output — leaving jet1..4 unexposed deliberately so HA
-    # doesn't fill up with dead entities.
-    pump1:
+    balboa_spa_id: spa
+    # GS501Z has one pump driving the jets. The component exposes the
+    # primary pump under the `jet1` key; friendly name "Pump 1" preserves
+    # entity_id `switch.hot_tub_pump_1`. jet2..4, blower, filter2 are
+    # intentionally unexposed (not present on GS501Z).
+    jet1:
       name: "Pump 1"
       id: hot_tub_pump1
+
+# Lights live on the dedicated `light:` platform (not switch). HA entity
+# becomes `light.hot_tub_lights` — dashboard refs to switch.hot_tub_lights
+# need updating accordingly.
+light:
+  - platform: balboa_spa
+    balboa_spa_id: spa
     light:
       name: "Lights"
       id: hot_tub_lights
@@ -210,7 +230,7 @@ switch:
 # ---------------------------------------------------------------------------
 text_sensor:
   - platform: balboa_spa
-    spa_id: spa
+    balboa_spa_id: spa
     # Board's internal RTC (HH:MM). Used to verify the filter schedule is
     # firing at the time you think it is. Drifts a few min/week — see the
     # sync_time button below for one-shot resync.
@@ -250,7 +270,7 @@ text_sensor:
 # ---------------------------------------------------------------------------
 button:
   - platform: balboa_spa
-    spa_id: spa
+    balboa_spa_id: spa
     # Push the ESP's wall clock to the board's RTC. Useful after every
     # solar-surplus power cycle if the board loses time (see README notes
     # on the contactor-induced reboot behaviour).
