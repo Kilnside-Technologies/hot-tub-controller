@@ -30,7 +30,7 @@
     #    *before* we open the contactor, so the contacts open dry.
     - service: climate.set_temperature
       target:
-        entity_id: climate.hot_tub_climate
+        entity_id: climate.cabin_hot_tub_climate
       data:
         temperature: 10
         hvac_mode: heat
@@ -49,4 +49,4 @@
         title: "Hot tub: standing down"
         message: >
           Solar export dropped to {{ states('sensor.solis_grid_exported_power') }} W.
-          Final water temp {{ states('sensor.hot_tub_water_temperature') }} °C.
+          Final water temp {{ states('sensor.cabin_hot_tub_water_temperature') }} °C.
