@@ -72,6 +72,13 @@ ota:
 logger:
   level: INFO
   baud_rate: 0   # Free up USB UART; we need GPIO1/3 free for stability.
+  logs:
+    # Suppress the "No new message since ...! Mark as dead!" spam from the
+    # BalboaSpa component when the RS485 bus is disconnected (commissioning,
+    # cabinet open, post-power-cycle). Real bus drops are still surfaced
+    # via binary_sensor.bus_connected. Drop to WARN once the spa is live
+    # if you want to keep an eye on transient bus issues.
+    BalboaSpa.component: ERROR
 
 # Telnet log stream on :23 (community pattern; comment out once stable)
 # CONFIRM: the `streaming_logger` external component is the usual way to get
@@ -121,7 +128,7 @@ balboa_spa:
 climate:
   - platform: balboa_spa
     spa_id: spa
-    name: "Hot Tub Climate"
+    name: "Climate"
     id: hot_tub_climate
     # Range capped to protect both the tub (>40 °C scalding risk for kids) and
     # the heater contactor (we don't want a runaway).
@@ -134,18 +141,18 @@ sensor:
   - platform: balboa_spa
     spa_id: spa
     temperature:
-      name: "Hot Tub Water Temperature"
+      name: "Water Temperature"
       id: hot_tub_water_temperature
       # Balboa pushes updates often; throttle to 30 s for HA / history graph.
       filters:
         - throttle: 30s
   # Diagnostics
   - platform: wifi_signal
-    name: "Hot Tub WiFi Signal"
+    name: "WiFi Signal"
     update_interval: 60s
     entity_category: diagnostic
   - platform: uptime
-    name: "Hot Tub Uptime"
+    name: "Uptime"
     entity_category: diagnostic
 
 binary_sensor:
@@ -154,34 +161,34 @@ binary_sensor:
     # Heater relay state — read-only; the Balboa board owns this and only
     # fires when (a) target > current temp AND (b) it's not in safety lockout.
     heater_active:
-      name: "Hot Tub Heater Active"
+      name: "Heater Active"
       id: hot_tub_heater_active
     # Filter cycle 1 *currently running* (vs. just scheduled).
     filter1_running:
-      name: "Hot Tub Filter Cycle 1"
+      name: "Filter Cycle 1"
       id: hot_tub_filter1_running
     # Filter cycle 2 *currently running* — only meaningful if you've enabled it.
     filter2_running:
-      name: "Hot Tub Filter Cycle 2"
+      name: "Filter Cycle 2"
       id: hot_tub_filter2_running
     # Circulation pump physically running. On GS501Z this is pump 1 at low
     # speed when the board has decided it needs to circulate (e.g. during a
     # filter cycle, freeze protection, or heater call).
     circulation:
-      name: "Hot Tub Circulation Pump"
+      name: "Circulation Pump"
       id: hot_tub_circulation
     # Heat mode = rest (vs. ready). Rest = only heat during a filter cycle.
     restmode:
-      name: "Hot Tub Rest Mode"
+      name: "Rest Mode"
       id: hot_tub_restmode
     # Temperature range high (vs. low). The two preset bands the board uses.
     highrange:
-      name: "Hot Tub High Range"
+      name: "High Range"
       id: hot_tub_highrange
     # Protocol heartbeat — true when the ESP is receiving valid frames.
     # If this drops, the RS485 bus has gone away.
     connected:
-      name: "Hot Tub Bus Connected"
+      name: "Bus Connected"
       id: hot_tub_bus_connected
       entity_category: diagnostic
 
@@ -192,10 +199,10 @@ switch:
     # separate "jets" output — leaving jet1..4 unexposed deliberately so HA
     # doesn't fill up with dead entities.
     pump1:
-      name: "Hot Tub Pump 1"
+      name: "Pump 1"
       id: hot_tub_pump1
     light:
-      name: "Hot Tub Lights"
+      name: "Lights"
       id: hot_tub_lights
 
 # ---------------------------------------------------------------------------
@@ -208,34 +215,34 @@ text_sensor:
     # firing at the time you think it is. Drifts a few min/week — see the
     # sync_time button below for one-shot resync.
     spa_time:
-      name: "Hot Tub Spa Time"
+      name: "Spa Time"
     # Filter cycle 1 configuration (start time + duration), read from NVRAM.
     filter1_config:
-      name: "Hot Tub Filter 1 Config"
+      name: "Filter 1 Config"
     filter2_config:
-      name: "Hot Tub Filter 2 Config"
+      name: "Filter 2 Config"
     # Most recent fault string (e.g. "Sensors out of sync", "Heater dry").
     # Empty when healthy.
     fault_message:
-      name: "Hot Tub Fault Message"
+      name: "Fault Message"
     fault_log_time:
-      name: "Hot Tub Last Fault Time"
+      name: "Last Fault Time"
     # Service nags: filter clean / sanitiser / pH check. Cleared with the
     # clear_reminder button after you've done the service.
     reminder:
-      name: "Hot Tub Reminder"
+      name: "Reminder"
     # Balboa firmware string.
     component_version:
-      name: "Hot Tub Spa Firmware"
+      name: "Spa Firmware"
       entity_category: diagnostic
 
   # ESPHome diagnostics
   - platform: version
-    name: "Hot Tub ESPHome Version"
+    name: "ESPHome Version"
     entity_category: diagnostic
   - platform: wifi_info
     ip_address:
-      name: "Hot Tub IP Address"
+      name: "IP Address"
       entity_category: diagnostic
 
 # ---------------------------------------------------------------------------
@@ -248,19 +255,19 @@ button:
     # solar-surplus power cycle if the board loses time (see README notes
     # on the contactor-induced reboot behaviour).
     sync_time:
-      name: "Hot Tub Sync Time"
+      name: "Sync Time"
     # Pull the full fault log out of NVRAM into the fault_* text sensors.
     request_fault_log:
-      name: "Hot Tub Request Fault Log"
+      name: "Request Fault Log"
     # Acknowledge the current service reminder. Only press this *after*
     # actually doing the service — the reminder timer is the board's only
     # nudge for filter changes.
     clear_reminder:
-      name: "Hot Tub Clear Reminder"
+      name: "Clear Reminder"
     # Toggle filter cycle 2 on/off. Filter 2 is optional; many UK installs
     # only use filter 1.
     disable_filter2:
-      name: "Hot Tub Toggle Filter 2"
+      name: "Toggle Filter 2"
 
 # ---------------------------------------------------------------------------
 # Deliberately NOT exposed (writes-to-NVRAM or hardware-irrelevant)
