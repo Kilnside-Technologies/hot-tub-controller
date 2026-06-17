@@ -50,12 +50,13 @@ api:
   encryption:
     key: !secret api_key
 
-# MQTT — secondary/observability path; matches existing broker convention.
+# MQTT — secondary/observability path. Publishes to the local Pi bridge at
+# 192.168.1.10 (anonymous, no TLS); the Pi bridges upstream to HA's Mosquitto
+# on Hetzner. HA itself reads via the encrypted native API above — MQTT here
+# is for external consumers / dashboards / other devices on the home LAN.
 # Topics: ${mqtt_prefix}/<entity>/state, etc.
 mqtt:
   broker: !secret mqtt_broker
-  username: !secret mqtt_username
-  password: !secret mqtt_password
   topic_prefix: ${mqtt_prefix}
   discovery: false   # HA gets entities via the api: block above; MQTT is for external consumers.
 
