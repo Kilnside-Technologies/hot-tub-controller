@@ -15,18 +15,19 @@
 
 substitutions:
   device_name: hot-tub
-  # Friendly name was renamed in HA UI to "Cabin Hot Tub" (the tub lives in
-  # the cabin). Keep YAML in sync so future reflashes don't fight the UI.
-  # Don't change device_name (esphome.name) — that's the OTA/mDNS identifier
-  # and changing it would force re-registration.
-  device_friendly: "Cabin Hot Tub"
-  # Match existing MQTT broker convention used elsewhere in this HA install.
-  # CONFIRM: cross-check against your broker's topic tree before flashing.
+  # Don't change device_name (esphome.name) — it's the OTA/mDNS identifier
+  # AND the entity-id prefix (binary_sensor.hot_tub_*, etc.). Renaming it
+  # forces re-registration and orphans every existing entity in HA.
+  #
+  # We deliberately do NOT set esphome.friendly_name. ESPHome 2024+ prepends
+  # slug(friendly_name) to each entity's object_id, so setting it produces
+  # `hot_tub_hot_tub_*` ids (node name doubled). Without it, ids stay clean
+  # (`hot_tub_heater_active`) and HA's device-level friendly name can still
+  # be set in the UI without touching firmware.
   mqtt_prefix: "home/hot_tub"
 
 esphome:
   name: ${device_name}
-  friendly_name: ${device_friendly}
   comment: "Balboa GS501Z bridge — see github.com/.../hot-tub-controller"
 
 esp32:
