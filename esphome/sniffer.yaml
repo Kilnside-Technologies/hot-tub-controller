@@ -23,10 +23,33 @@ esp32:
   framework:
     type: arduino
 
-# USB serial only — no wifi/api/ota needed for a bench sniff.
+# WiFi so we read the counts over the network instead of a tethered laptop.
+# Creds come from esphome/secrets.yaml (same as the main firmware).
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "balboa-sniffer-fallback"
+    password: !secret ota_password
+
+captive_portal:
+
+# Native API — lets `esphome logs` attach over WiFi (and HA could adopt it).
+api:
+
+# OTA so future re-flashes go over WiFi. NOTE: the FIRST flash is still USB.
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Browser readout: open http://balboa-sniffer.local/ (or the device IP) on any
+# device — phone included — to watch all 6 core rates live. No esphome to READ.
+web_server:
+  port: 80
+
 logger:
   level: INFO
-  baud_rate: 115200   # USB log — do NOT set 0, this is how we read the result
+  baud_rate: 115200   # still logs over USB too, if tethered
 
 # One hardware pulse counter per candidate core. Counting BOTH edges, so a
 # square clock reads ~2x its frequency; idle/floating cores read ~0.
@@ -34,8 +57,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO25
     id: c_wg
-    name: "white/green"
-    internal: true
+    name: "GPIO25 white-green"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
@@ -44,8 +66,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO26
     id: c_og
-    name: "orange"
-    internal: true
+    name: "GPIO26 orange"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
@@ -54,8 +75,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO27
     id: c_wb
-    name: "white/blue"
-    internal: true
+    name: "GPIO27 white-blue"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
@@ -64,8 +84,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO32
     id: c_gn
-    name: "green"
-    internal: true
+    name: "GPIO32 green"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
@@ -74,8 +93,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO33
     id: c_wbr
-    name: "white/brown"
-    internal: true
+    name: "GPIO33 white-brown"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
@@ -84,8 +102,7 @@ sensor:
   - platform: pulse_counter
     pin: GPIO34          # input-only — fine, the divider sets the level
     id: c_br
-    name: "brown"
-    internal: true
+    name: "GPIO34 brown"
     update_interval: 1s
     internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
     count_mode:
