@@ -44,6 +44,11 @@ ota:
 
 logger:
 
+# Browser readout over WiFi: open http://balboa-decoder.local/ (or the IP) on
+# any device incl. a phone, to watch the decoded values live.
+web_server:
+  port: 80
+
 # Local component (vendored kgstorm 'inputs' decoder)
 external_components:
   - source:
@@ -72,6 +77,7 @@ binary_sensor:
     parent_id: display_handler
     type: heater
     name: "Heater"
+    id: balboa_heater
   - platform: inputs
     parent_id: display_handler
     type: pump
@@ -86,3 +92,12 @@ text_sensor:
     parent_id: display_handler
     type: error_code
     name: "Error Code"
+
+# Clean readout in `esphome logs` (over WiFi) too — look for "decode:".
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          ESP_LOGI("decode", "water=%.1f  set=%.1f  heater=%d",
+            id(balboa_water_temp).state, id(balboa_set_temp).state,
+            (int) id(balboa_heater).state);
