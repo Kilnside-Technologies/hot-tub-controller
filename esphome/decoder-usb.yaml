@@ -1,0 +1,73 @@
+# USB-only bench flash of the VL260 display-bus decoder.
+# No WiFi / no secrets — flashes over USB and prints the decoded values to the
+# serial log every 5 s (look for "decode:" lines). Use this to confirm the
+# decode works; decoder.yaml is the WiFi/HA version for later.
+#
+# REQUIRED WIRING (read lines, via 1k/2.2k dividers, tapping J2 in parallel):
+#   data  (white/blue, pin 5) -> GPIO34   clock (orange, pin 6) -> GPIO35
+#   GND   (blue, pin 4) -> ESP GND.  ESP powered from USB.
+
+substitutions:
+  UNITS: "C"
+
+esphome:
+  name: balboa-decoder
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf       # the kgstorm 'inputs' component needs the IDF GPIO/ISR API
+
+logger:
+  level: INFO
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+sensor:
+  - platform: inputs
+    id: display_handler
+    measured_temp:
+      name: "Water Temperature"
+      id: balboa_water_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
+    set_temp:
+      name: "Set Temperature"
+      id: balboa_set_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
+
+binary_sensor:
+  - platform: inputs
+    parent_id: display_handler
+    type: heater
+    name: "Heater"
+    id: balboa_heater
+  - platform: inputs
+    parent_id: display_handler
+    type: pump
+    name: "Pump"
+  - platform: inputs
+    parent_id: display_handler
+    type: light
+    name: "Light"
+
+text_sensor:
+  - platform: inputs
+    parent_id: display_handler
+    type: error_code
+    name: "Error Code"
+
+# Clean once-per-5s readout on the USB serial log: look for "decode:".
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          ESP_LOGI("decode", "water=%.1f  set=%.1f  heater=%d",
+            id(balboa_water_temp).state, id(balboa_set_temp).state,
+            (int) id(balboa_heater).state);
