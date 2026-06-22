@@ -1,0 +1,104 @@
+# Balboa J2 activity sniffer — BENCH BRING-UP TOOL (not the final firmware).
+#
+# Purpose: the multimeter found 5 V (white/orange) + GND (blue) but cannot see
+# the clock/display-data, which are ~10 us low-duty pulses. This counts EDGES
+# PER SECOND on each of the 6 unknown cores so we can spot which ones are live.
+# The core(s) reading thousands of edges/s are the clock (highest) + display
+# data. Idle/floating cores read ~0.
+#
+# Wiring (see plan): each candidate core -> 1.8k/3.3k divider -> the GPIO below.
+#   Spa GND (blue) -> ESP32 GND  (mandatory common reference)
+#   white/orange (5 V) -> NOT connected
+# NEVER take a 5 V core straight to a GPIO — always through its divider.
+#
+# Flash + watch:   esphome run esphome/sniffer.yaml      (USB)
+#   or:            esphome logs esphome/sniffer.yaml
+# Read the "sniff:" line once per second.
+
+esphome:
+  name: balboa-sniffer
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# USB serial only — no wifi/api/ota needed for a bench sniff.
+logger:
+  level: INFO
+  baud_rate: 115200   # USB log — do NOT set 0, this is how we read the result
+
+# One hardware pulse counter per candidate core. Counting BOTH edges, so a
+# square clock reads ~2x its frequency; idle/floating cores read ~0.
+sensor:
+  - platform: pulse_counter
+    pin: GPIO25
+    id: c_wg
+    name: "white/green"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+  - platform: pulse_counter
+    pin: GPIO26
+    id: c_og
+    name: "orange"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+  - platform: pulse_counter
+    pin: GPIO27
+    id: c_wb
+    name: "white/blue"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+  - platform: pulse_counter
+    pin: GPIO32
+    id: c_gn
+    name: "green"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+  - platform: pulse_counter
+    pin: GPIO33
+    id: c_wbr
+    name: "white/brown"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+  - platform: pulse_counter
+    pin: GPIO34          # input-only — fine, the divider sets the level
+    id: c_br
+    name: "brown"
+    internal: true
+    update_interval: 1s
+    internal_filter: 1us       # MUST be < the ~10us bit time, or PCNT filters the bus out
+    count_mode:
+      rising_edge: INCREMENT
+      falling_edge: INCREMENT
+
+# One clean line per second with all 6 rates (pulses/min as ESPHome reports).
+# The big number(s) = your live bus lines.
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          ESP_LOGI("sniff",
+            "wg=%.0f  og=%.0f  wb=%.0f  gn=%.0f  wbr=%.0f  br=%.0f",
+            id(c_wg).state, id(c_og).state, id(c_wb).state,
+            id(c_gn).state, id(c_wbr).state, id(c_br).state);
