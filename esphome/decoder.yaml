@@ -86,6 +86,10 @@ binary_sensor:
     parent_id: display_handler
     type: light
     name: "Light"
+  - platform: inputs
+    parent_id: display_handler
+    type: blower
+    name: "Blower"
 
 text_sensor:
   - platform: inputs

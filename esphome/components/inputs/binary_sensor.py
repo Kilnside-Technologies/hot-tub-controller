@@ -11,7 +11,7 @@ CONF_PARENT_ID = 'parent_id'
 # This platform requires referencing an existing HotTubDisplaySensor instance
 CONFIG_SCHEMA = binary_sensor.binary_sensor_schema().extend({
     cv.Required(CONF_PARENT_ID): cv.use_id(HotTubDisplaySensor),
-    cv.Required('type'): cv.enum({'heater': 'HEATER', 'pump': 'PUMP', 'light': 'LIGHT'}),
+    cv.Required('type'): cv.enum({'heater': 'HEATER', 'pump': 'PUMP', 'light': 'LIGHT', 'blower': 'BLOWER'}),
 })
 
 
@@ -26,3 +26,5 @@ async def to_code(config):
         cg.add(parent.set_pump_sensor(var))
     elif sensor_type == 'light':
         cg.add(parent.set_light_sensor(var))
+    elif sensor_type == 'blower':
+        cg.add(parent.set_blower_sensor(var))

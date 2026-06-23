@@ -82,6 +82,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
   esphome::binary_sensor::BinarySensor *heater_sensor_ = nullptr;  // derived from p1 bit5
   esphome::binary_sensor::BinarySensor *pump_sensor_ = nullptr;    // derived from p4 bit0
   esphome::binary_sensor::BinarySensor *light_sensor_ = nullptr;   // derived from p4 bit1
+  esphome::binary_sensor::BinarySensor *blower_sensor_ = nullptr;  // GS501Z: derived from p4 bit2
 
   // Last published discrete states
   int8_t last_heater = -1;  // -1=unknown, otherwise 0/1
@@ -125,6 +126,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
   void set_heater_sensor(esphome::binary_sensor::BinarySensor *s) { heater_sensor_ = s; }
   void set_pump_sensor(esphome::binary_sensor::BinarySensor *s) { pump_sensor_ = s; }
   void set_light_sensor(esphome::binary_sensor::BinarySensor *s) { light_sensor_ = s; }
+  void set_blower_sensor(esphome::binary_sensor::BinarySensor *s) { blower_sensor_ = s; }
 
 
 
@@ -175,6 +177,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     // Known letter/dash patterns (approximate common 7-seg shapes)
     const std::pair<uint8_t,char> letters[] = {
       {0b0000001, '-'}, // dash (g)
+      {0b1100111, 'P'}, // P (segments a,b,e,f,g) — GS501Z "Pr" priming display
       {0b0110111, 'H'}, // H
       {0b1111110, 'O'}, // O 
       {0b0110000, 'I'}, // I 
@@ -205,6 +208,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
 
   // Translate known error codes to plain English
   static const char* translate_error_code(const std::string &code) {
+    if (code == "Pr" || code == "PR") return "priming (startup, normal)";
     if (code == "--") return "unknown temperature (expected after power on)";
     if (code == "HH") return "high overheat (water temp over 118 F)";
     if (code == "OH") return "overheat (water temp over 108 F)";
@@ -580,6 +584,14 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     int8_t cur_heater = static_cast<int8_t>((p1_bits >> 2) & 0x1);
     int8_t cur_pump = static_cast<int8_t>((p4 >> 1) & 0x1);   // GS501Z: pump = p4 bit1
     int8_t cur_light = static_cast<int8_t>((p4 >> 0) & 0x1);  // GS501Z: light = p4 bit0
+    {  // GS501Z: blower = p4 bit2 — publish on change (toggles rarely, no stability needed)
+      static int8_t last_blower = -1;
+      int8_t cur_blower = static_cast<int8_t>((p4 >> 2) & 0x1);
+      if (blower_sensor_ && cur_blower != last_blower) {
+        blower_sensor_->publish_state(static_cast<bool>(cur_blower));
+        last_blower = cur_blower;
+      }
+    }
 
     // Update heater stability (existing)
     if (candidate_heater == cur_heater) { if (stable_heater < 255) stable_heater++; } else { candidate_heater = cur_heater; stable_heater = 1; }
