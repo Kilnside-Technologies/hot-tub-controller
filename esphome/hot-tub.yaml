@@ -146,56 +146,67 @@ text_sensor:
       name: "IP Address"
       entity_category: diagnostic
 
-# ===== Button write outputs =====
-# Each GPIO configured as OUTPUT (defaults LOW at boot). To press a button we
-# turn the output on for ~80 ms then off. The wire stays connected to the spa
-# board's button-sense input through the 1 kΩ resistor — drive HIGH = press,
-# drive LOW = idle (no press). The board reads sustained HIGH for one of its
-# detection cycles (~ms) and registers a press.
-output:
-  - platform: gpio
-    pin: GPIO33
-    id: out_btn_light
-  - platform: gpio
-    pin: GPIO4
-    id: out_btn_jets
-  - platform: gpio
-    pin: GPIO16
-    id: out_btn_blower
-  - platform: gpio
-    pin: GPIO17
-    id: out_btn_temp
-
-# ===== HA-callable buttons (momentary press) =====
+# ===== Button write — high-impedance idle, brief OUTPUT-HIGH for press =====
+# CRITICAL: previous design used `output: platform: gpio` which configures the
+# pin as OUTPUT-LOW at idle. That actively pulled each button line to 0 V
+# continuously — and crucially, since the button lines are BIDIRECTIONAL
+# (board echoes panel-button presses back on the matching line as ~200ms HIGH
+# pulses), our active-LOW idle drive SUPPRESSED panel echoes. Result: panel
+# buttons became unresponsive while HA-driven presses still worked. Diagnosed
+# live 2026-06-23 evening.
+#
+# Fix: leave the pins as INPUT (high-impedance) at idle so the board is free
+# to drive its own echoes. To press, briefly set OUTPUT HIGH, then release
+# back to INPUT. We use raw esp-idf GPIO calls in lambdas (the `output:`
+# platform doesn't support dynamic mode switching).
+#
+# Wiring unchanged: each tap pin via 1 kΩ to GPIO. Spa board has its own
+# internal pull-down so lines naturally sit at 0 V when nobody's driving.
 button:
   - platform: template
     name: "Press Light"
     id: btn_press_light
     on_press:
-      - output.turn_on: out_btn_light
+      - lambda: |-
+          gpio_set_direction(GPIO_NUM_33, GPIO_MODE_OUTPUT);
+          gpio_set_level(GPIO_NUM_33, 1);
       - delay: ${press_pulse}
-      - output.turn_off: out_btn_light
+      - lambda: |-
+          gpio_set_level(GPIO_NUM_33, 0);
+          gpio_set_direction(GPIO_NUM_33, GPIO_MODE_INPUT);
   - platform: template
     name: "Press Jets"
     id: btn_press_jets
     on_press:
-      - output.turn_on: out_btn_jets
+      - lambda: |-
+          gpio_set_direction(GPIO_NUM_4, GPIO_MODE_OUTPUT);
+          gpio_set_level(GPIO_NUM_4, 1);
       - delay: ${press_pulse}
-      - output.turn_off: out_btn_jets
+      - lambda: |-
+          gpio_set_level(GPIO_NUM_4, 0);
+          gpio_set_direction(GPIO_NUM_4, GPIO_MODE_INPUT);
   - platform: template
     name: "Press Blower"
     id: btn_press_blower
     on_press:
-      - output.turn_on: out_btn_blower
+      - lambda: |-
+          gpio_set_direction(GPIO_NUM_16, GPIO_MODE_OUTPUT);
+          gpio_set_level(GPIO_NUM_16, 1);
       - delay: ${press_pulse}
-      - output.turn_off: out_btn_blower
+      - lambda: |-
+          gpio_set_level(GPIO_NUM_16, 0);
+          gpio_set_direction(GPIO_NUM_16, GPIO_MODE_INPUT);
   - platform: template
     name: "Press Temp"
     id: btn_press_temp
     on_press:
-      - output.turn_on: out_btn_temp
+      - lambda: |-
+          gpio_set_direction(GPIO_NUM_17, GPIO_MODE_OUTPUT);
+          gpio_set_level(GPIO_NUM_17, 1);
       - delay: ${press_pulse}
-      - output.turn_off: out_btn_temp
+      - lambda: |-
+          gpio_set_level(GPIO_NUM_17, 0);
+          gpio_set_direction(GPIO_NUM_17, GPIO_MODE_INPUT);
   - platform: template
     name: "Walk Setpoint to Target Now"
     id: btn_walk_now
@@ -247,9 +258,7 @@ script:
           args: ['(int) id(target_setpoint).state']
       - lambda: 'id(walk_guard) = 0;'
       # Wake press — reveals current setpoint, no change to value
-      - output.turn_on: out_btn_temp
-      - delay: ${press_pulse}
-      - output.turn_off: out_btn_temp
+      - button.press: btn_press_temp
       - delay: ${walk_interpress}   # let decoder pick up the revealed setpoint
       - while:
           condition:
@@ -262,9 +271,7 @@ script:
               if (id(walk_guard) >= ${walk_max_iters}) return false;
               return (int) current != (int) id(target_setpoint).state;
           then:
-            - output.turn_on: out_btn_temp
-            - delay: ${press_pulse}
-            - output.turn_off: out_btn_temp
+            - button.press: btn_press_temp
             - delay: ${walk_interpress}
             - lambda: 'id(walk_guard)++;'
       - logger.log:
@@ -287,9 +294,7 @@ script:
             lambda: 'return !isnan(id(balboa_water_temp).state);'
           timeout: 120s
       - logger.log: "boot: priming complete, capturing setpoint via single Temp press"
-      - output.turn_on: out_btn_temp
-      - delay: ${press_pulse}
-      - output.turn_off: out_btn_temp
+      - button.press: btn_press_temp
 
 # Periodic setpoint refresh — every 30 min press Temp once to wake set-mode
 # and let the decoder re-capture the setpoint. Belt-and-braces against HA
@@ -298,6 +303,4 @@ interval:
   - interval: 30min
     then:
       - logger.log: "periodic: refreshing setpoint via single Temp press"
-      - output.turn_on: out_btn_temp
-      - delay: ${press_pulse}
-      - output.turn_off: out_btn_temp
+      - button.press: btn_press_temp
