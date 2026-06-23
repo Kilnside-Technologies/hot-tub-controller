@@ -8,10 +8,18 @@ The ESP32 taps the Balboa board over its **J2 topside-display bus** (a
 proprietary synchronous clock+data signalling format used by the panel — NOT
 RS485, despite a lot of community speculation; see *Protocol* below). It
 exposes water temperature, set temperature, heater, motor (circ/jets) and
-blower state as native HA entities, and drives the temp button to walk the
-setpoint up/down for solar/price-responsive heating. A Shelly EM Gen3 measures
-the hot tub's incoming supply and switches a 40 A contactor that isolates the
-entire tub when there's no surplus to burn.
+blower state as native HA entities, plus four HA-callable buttons (Light,
+Jets, Blower, Temp — physically presses the spa from HA) and a closed-loop
+setpoint controller that walks the temp up/down to any target via the
+ride-the-bounce algorithm. A Shelly EM Gen3 measures the hot tub's incoming
+supply and switches a 40 A contactor that isolates the entire tub when there's
+no surplus to burn. Decoder state is also streamed to BigQuery every 30 min
+(`ktl-home-energy.meter_history.ha_hot_tub_30min`) for long-term cost-vs-state
+analysis past HA's ~10-day recorder window.
+
+**Status (2026-06-23): end-to-end working.** Production firmware deployed,
+all four button entities tested from HA, closed-loop setpoint walk validated.
+Full protocol decode in [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## Goals
 
@@ -100,15 +108,32 @@ write path is direct GPIO through the 1 kΩ. Simpler than expected.
    [docs/pinout.md](docs/pinout.md). Cable is 568B; pin 1 (white/orange) is
    +5 V; pin 4 (blue) is GND; pin 5 (white/blue) is data; pin 6 (green) is
    clock; pins 2/3/7/8 (orange / white-green / white-brown / brown) are the
-   Light / Jets / Blower / Temp buttons.
+   Light / Jets / Blower / Temp buttons. Each tapped pin goes through a
+   1 kΩ–2.2 kΩ series resistor to its GPIO.
 2. **Common ground first** — always tie pin 4 to ESP GND before anything else.
-3. **Flash the decoder** — `cp secrets.yaml.template esphome/secrets.yaml`,
-   fill in WiFi / API / OTA values, then
-   `esphome run esphome/decoder.yaml`. Verify it picks up water temperature
-   within a few seconds.
-4. **Add to HA** — entities auto-discover via the ESPHome API integration.
+3. **Flash the production firmware** —
+   `cp secrets.yaml.template esphome/secrets.yaml`, fill in WiFi / API / OTA
+   values, then `esphome run esphome/hot-tub.yaml`. (For a read-only diagnostic
+   build use `decoder.yaml` instead — same decoder, no button writes.) Verify
+   it picks up water temperature within ~10 s.
+4. **Add to HA** — the ESPHome integration auto-discovers the `hot-tub` device
+   via mDNS; paste the `api_key` from `esphome/secrets.yaml` when prompted.
 5. **Wire the contactor + Shelly** — see commissioning docs. Mains work is
    Part P notifiable in the UK; get a competent person.
+
+### HA entities exposed by the production firmware
+- **Sensors**: water temperature, set temperature (only valid during set-mode)
+- **Binary sensors**: heater, pump (motor running), light, blower, plus
+  WiFi/uptime diagnostics
+- **Buttons (momentary)**: Press Light, Press Jets, Press Blower, Press Temp
+  (each pulses the corresponding GPIO HIGH for 80 ms → one button press on
+  the spa); Walk Setpoint to Target Now (runs the bounce controller)
+- **Number**: Target Setpoint (26–40 °C, integer) — set this, then press the
+  walk button to drive the temp button until the decoded setpoint matches
+- **Text sensor**: Error Code (Balboa fault display)
+
+Entity IDs use the `cabin_hot_tub_*` prefix in HA (Cabin-area assignment
+disambiguates from the Shelly EM's `hot_tub_supply_*` energy entities).
 
 ## Repository layout
 
@@ -117,12 +142,15 @@ hot-tub-controller/
 ├── README.md
 ├── secrets.yaml.template
 ├── esphome/
-│   ├── decoder.yaml                 # Production firmware (read-only currently)
+│   ├── hot-tub.yaml                 # ★ Production firmware (decoder + 4 button
+│   │                                #   writes + closed-loop setpoint walker)
+│   ├── decoder.yaml                 # Read-only diagnostic build (no writes)
 │   ├── components/inputs/           # Vendored kgstorm decoder + GS501Z patches
+│   │                                #   (esp32-spa.h: bit map, stability filters)
 │   ├── button-sniffer.yaml          # Diagnostic: passive button-line read
 │   ├── button-activity-sniffer.yaml # Diagnostic: button-line state changes
-│   ├── rawcap.yaml + rawcap.h       # Diagnostic: distinct-frame capture
-│   └── hot-tub.yaml                 # (legacy / scratch — kept for reference)
+│   │                                #   (caught the ~200ms board-echo pulses)
+│   └── rawcap.yaml + rawcap.h       # Diagnostic: distinct-frame capture
 ├── home-assistant/
 │   ├── automations/
 │   │   ├── solar_surplus_on.yaml
@@ -133,12 +161,20 @@ hot-tub-controller/
 │       └── hot_tub.yaml             # Lovelace card
 ├── sim/
 │   └── setpoint_sim.py              # Bounce-controller for the temp-button loop
+│                                    #   (ported into hot-tub.yaml as a script)
 └── docs/
     ├── HANDOFF.md                   # ★ Start here if picking this up cold
     ├── wiring.md
     ├── pinout.md
     └── commissioning.md
 ```
+
+### Where the BigQuery ingest lives
+The 30-min decoder state snapshot is written by the **kilnergy** repo
+(`kilnergy/shadow/ha_rates_ingest.py`), not this one. It queries HA's REST API
+for the entities listed above and appends a row to
+`ktl-home-energy.meter_history.ha_hot_tub_30min`. Cron runs at `:01` and `:31`
+on ktl-ci-runner via `~/ha_rates_cron.sh`.
 
 ## Community references
 
