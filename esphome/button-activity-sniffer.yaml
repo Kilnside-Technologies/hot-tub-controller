@@ -1,0 +1,115 @@
+# Button-line activity sniffer — jets-mystery experiment (v2, binary_sensor).
+#
+# History:
+#   v1 used `pulse_counter` to count edges/sec per button line. Looked great on
+#   paper but had a NASTY bug: ESPHome's pulse_counter on ESP32 talks to the
+#   PCNT peripheral directly and silently OVERRIDES the standard pin mode
+#   config — so `pulldown: true` was ignored and PCNT left internal pull-up
+#   enabled on every input. Result: each GPIO sat at 3.3V → through the 1k tap
+#   resistor that drove the spa board's button input HIGH continuously → the
+#   board cycled state on every detection scan (setpoint walked, blower
+#   clicked, lights flashed). Multimeter on a disconnected GPIO header read
+#   3.2V even after patching to `pulldown: true` inside the pulse_counter pin
+#   config. Switch firmware verified: with binary_sensor, the pin mode IS
+#   respected.
+#
+# v2 uses `binary_sensor: platform: gpio` with explicit `pullup: false,
+# pulldown: true`. Loses precise edge counting, but we get:
+#   - Reliable idle level (lines truly at 0V with no wires connected)
+#   - State-change events logged automatically (each ON/OFF transition prints)
+#   - A 1-second snapshot of every line's current logic level
+# That's plenty to answer "does the board ever drive these lines?" for the
+# jets/blower indicator question.
+#
+# Wiring (unchanged, each core via 1k–2.2k series resistor):
+#   pin 2 (orange)      -> GPIO33  (Light)
+#   pin 3 (white/green) -> GPIO4   (Jets)
+#   pin 7 (white/brown) -> GPIO16  (Blower)
+#   pin 8 (brown)       -> GPIO17  (Temp)
+#   pin 4 (blue, GND)   -> ESP GND  (mandatory common ref)
+#
+# Verification step BEFORE reconnecting wires after flash:
+#   1. Multimeter each of the 4 GPIO header pins to GND.
+#   2. Should read ~0V on every one. If any reads >100mV, do NOT reconnect —
+#      something's still wrong with the pin mode and the spa board will get
+#      false presses again.
+
+esphome:
+  name: balboa-actsniff
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "balboa-actsniff-fb"
+    password: !secret ota_password
+
+captive_portal:
+
+api:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+
+logger:
+  level: INFO
+
+binary_sensor:
+  - platform: gpio
+    name: "Light pin2"
+    id: bs_light
+    pin:
+      number: GPIO33
+      mode:
+        input: true
+        pullup: false
+        pulldown: true
+  - platform: gpio
+    name: "Jets pin3"
+    id: bs_jets
+    pin:
+      number: GPIO4
+      mode:
+        input: true
+        pullup: false
+        pulldown: true
+  - platform: gpio
+    name: "Blower pin7"
+    id: bs_blower
+    pin:
+      number: GPIO16
+      mode:
+        input: true
+        pullup: false
+        pulldown: true
+  - platform: gpio
+    name: "Temp pin8"
+    id: bs_temp
+    pin:
+      number: GPIO17
+      mode:
+        input: true
+        pullup: false
+        pulldown: true
+
+# Periodic logic-level dump — every 1s, current state of all four lines.
+# State CHANGES also log automatically via the binary_sensor's default handler,
+# so a real bus event shows up as "Light pin2 >> ON" / ">> OFF" in addition to
+# the periodic snapshot.
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          ESP_LOGI("state",
+            "light=%d  jets=%d  blower=%d  temp=%d",
+            (int) id(bs_light).state, (int) id(bs_jets).state,
+            (int) id(bs_blower).state, (int) id(bs_temp).state);

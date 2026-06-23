@@ -1,163 +1,98 @@
-# Balboa GS501Z hot tub controller — ESPHome config
+# Balboa GS501Z / VL260 hot tub controller — PRODUCTION ESPHome firmware.
 #
-# Hardware:
-#   - ESP32 WROOM-32E dev board
-#   - JZK TTL <-> RS485 module (auto flow control, 3.3 V / 5 V tolerant)
-#   - 12 V tap from Balboa J2 RJ45, stepped to 5 V via LM2596 buck
+# Reads the J2 topside-display bus AND writes button presses through direct
+# ESP32 GPIO drive (no opto/relay/transistor — discovered 2026-06-23 that the
+# existing 1 kΩ tap is sufficient current-limiting). Closed-loop setpoint
+# control via the ride-the-bounce algorithm from sim/setpoint_sim.py.
 #
-# RS485 component & protocol:
-#   github://brianfeucht/esphome-balboa-spa
-#   (which in turn derives from ccutrer/balboa_worldwide_app)
+# The previous content of this file (RS485 attempt using
+# brianfeucht/esphome-balboa-spa) was based on the wrong-protocol theory; the
+# GS501Z J2 isn't RS485 at all, it's the display bus. Git history has the
+# previous version if you need it for reference.
 #
-# NOTE: spa_temp_scale must be C for UK installation. The Balboa board has
-# a separate F/C setting that needs to match — verify on the topside panel
-# during commissioning (docs/commissioning.md step 4).
+# DEVICE NAME = `hot-tub` — gives entity IDs `hot_tub_*` (matches README).
+# Migration step (2026-06-23): user removed the dead `cabin_hot_tub_*` device
+# (failed RS485 firmware) and the transient `balboa_decoder_*` device used
+# during today's bring-up; this firmware is the production replacement.
+# When you re-add the device in HA it will discover via mDNS at hot-tub.local;
+# the API encryption key to paste is the value of `api_key` in secrets.yaml.
+#
+# WIRING (568B, each tap via 1 kΩ–2.2 kΩ series resistor):
+#   pin 4 (blue)        -> ESP GND     (mandatory common ref)
+#   pin 5 (white/blue)  -> GPIO34      DATA (input-only)
+#   pin 6 (green)       -> GPIO35      CLOCK (input-only)
+#   pin 2 (orange)      -> GPIO33      Light button
+#   pin 3 (white/green) -> GPIO4       Jets button
+#   pin 7 (white/brown) -> GPIO16      Blower button
+#   pin 8 (brown)       -> GPIO17      Temp button
+#   pin 1 (white/orange, +5V) -> NOT CONNECTED
+#
+# Button output pins use ESPHome's `output: platform: gpio` which configures
+# them as OUTPUT LOW at boot. To "press" a button, drive HIGH for ~80 ms,
+# then back to LOW. Current is ≤3.3 mA through the 1 kΩ resistor — well
+# below any damage threshold and confirmed safe by today's bench tests.
 
 substitutions:
-  device_name: hot-tub
-  # Don't change device_name (esphome.name) — it's the OTA/mDNS identifier
-  # AND the entity-id prefix (binary_sensor.hot_tub_*, etc.). Renaming it
-  # forces re-registration and orphans every existing entity in HA.
-  #
-  # We deliberately do NOT set esphome.friendly_name. ESPHome 2024+ prepends
-  # slug(friendly_name) to each entity's object_id, so setting it produces
-  # `hot_tub_hot_tub_*` ids (node name doubled). Without it, ids stay clean
-  # (`hot_tub_heater_active`) and HA's device-level friendly name can still
-  # be set in the UI without touching firmware.
-  mqtt_prefix: "home/hot_tub"
+  UNITS: "C"
+  press_pulse: "80ms"          # tune empirically per-button if needed
+  walk_interpress: "1500ms"    # gap between temp presses during setpoint walk
+  walk_commit_wait: "3000ms"   # set-mode timeout after last press
+  walk_max_iters: "35"         # safety cap (sim worst case is 28)
 
 esphome:
-  name: ${device_name}
-  comment: "Balboa GS501Z bridge — see github.com/.../hot-tub-controller"
+  name: hot-tub
 
 esp32:
   board: esp32dev
   framework:
-    type: arduino
+    type: esp-idf      # vendored kgstorm component requires esp-idf
 
-# ---------------------------------------------------------------------------
-# Connectivity
-# ---------------------------------------------------------------------------
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  # Hot tub cabinet is metal-lined; if signal is weak, fall back to AP for
-  # rescue/reconfig rather than getting stuck in a reboot loop.
   ap:
-    ssid: "${device_name}-fallback"
+    ssid: "hot-tub-fallback"
     password: !secret ota_password
-  power_save_mode: none  # RS485 stream is continuous; don't let WiFi nap.
 
 captive_portal:
 
-# Native HA API (encrypted) — primary control path.
 api:
   encryption:
     key: !secret api_key
-
-# MQTT — secondary/observability path. Publishes to the local Pi bridge at
-# 192.168.1.10 (anonymous, no TLS); the Pi bridges upstream to HA's Mosquitto
-# on Hetzner. HA itself reads via the encrypted native API above — MQTT here
-# is for external consumers / dashboards / other devices on the home LAN.
-# Topics: ${mqtt_prefix}/<entity>/state, etc.
-mqtt:
-  broker: !secret mqtt_broker
-  topic_prefix: ${mqtt_prefix}
-  discovery: false   # HA gets entities via the api: block above; MQTT is for external consumers.
 
 ota:
   - platform: esphome
     password: !secret ota_password
 
-# ---------------------------------------------------------------------------
-# Logging — INFO + telnet logger for in-cabinet debugging
-# ---------------------------------------------------------------------------
-# The tub cabinet is awkward to crack open; expose logs over the network so
-# you can `nc <ip> 23` from indoors during teething troubles.
 logger:
   level: INFO
-  baud_rate: 0   # Free up USB UART; we need GPIO1/3 free for stability.
-  logs:
-    # Suppress the "No new message since ...! Mark as dead!" spam from the
-    # BalboaSpa component when the RS485 bus is disconnected (commissioning,
-    # cabinet open, post-power-cycle). Real bus drops are still surfaced
-    # via binary_sensor.bus_connected. Drop to WARN once the spa is live
-    # if you want to keep an eye on transient bus issues.
-    BalboaSpa.component: ERROR
 
-# Telnet log stream on :23 (community pattern; comment out once stable)
-# CONFIRM: the `streaming_logger` external component is the usual way to get
-# telnet logs in ESPHome — adjust source if upstream renamed it.
-# external_components:
-#   - source: github://oxan/esphome-stream-server
-# stream_server:
-#   uart_id: spa_uart
-#   port: 23
+# Browser readout over WiFi: http://hot-tub.local/
+web_server:
+  port: 80
 
-# ---------------------------------------------------------------------------
-# UART <-> RS485 (TTL side of the JZK module)
-# ---------------------------------------------------------------------------
-# Pin mapping — CONFIRM against the actual wiring once the board is in place:
-#   ESP32 GPIO17 (TX)  ->  JZK TXD (TTL side)
-#   ESP32 GPIO16 (RX)  <-  JZK RXD (TTL side)
-#   ESP32 5V           ->  JZK VCC
-#   ESP32 GND          ->  JZK GND
-# JZK RS485 side: A+ and B- go to the matching pins on Balboa J2.
-uart:
-  id: spa_uart
-  tx_pin: GPIO17
-  rx_pin: GPIO16
-  baud_rate: 115200
-  rx_buffer_size: 512   # Balboa frames are short but bursty; 512 is the
-                        # buffer size recommended in brianfeucht's README.
-
-# ---------------------------------------------------------------------------
-# Balboa Spa component
-# ---------------------------------------------------------------------------
-# Component source: github://brianfeucht/esphome-balboa-spa
-# CONFIRM: this YAML matches the component's current API. The component is
-# still moving; if `esphome compile` complains about unknown keys, check the
-# component README for the canonical example.
+# Vendored kgstorm decoder component (patched for GS501Z bit map + blower stability)
 external_components:
-  - source: github://brianfeucht/esphome-balboa-spa
-    components: [balboa_spa]
+  - source:
+      type: local
+      path: components
 
-balboa_spa:
-  id: spa
-  uart_id: spa_uart
-  spa_temp_scale: C   # UK install — keep this C even if the topside is in F.
-
-# Required time source for filter scheduling + the sync_time button. HA
-# pushes its (NTP-disciplined) clock to the ESP, which then pushes it on
-# to the Balboa RTC when sync_time is pressed.
-time:
-  - platform: homeassistant
-    id: homeassistant_time
-
-# ---------------------------------------------------------------------------
-# Entities — all prefixed `hot_tub_` for HA tidiness
-# ---------------------------------------------------------------------------
-climate:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    name: "Climate"
-    id: hot_tub_climate
-    # Range capped to protect both the tub (>40 °C scalding risk for kids) and
-    # the heater contactor (we don't want a runaway).
-    visual:
-      min_temperature: 10 °C
-      max_temperature: 40 °C
-      temperature_step: 0.5 °C
-
-# Water temperature is exposed via the climate entity's current_temperature
-# attribute — the balboa_spa sensor platform does NOT expose a separate
-# `temperature:` key. For dashboard gauges/history graphs you'll want a
-# template sensor in HA that reads climate.hot_tub_climate's current_temp
-# attribute. See home-assistant/sensors/hot_tub.yaml.
+# ===== Display-bus decode (read-only) =====
 sensor:
-  # Diagnostics only — the balboa_spa platform sensors (blower, heatstate,
-  # fault counters etc.) are intentionally omitted; their values are surfaced
-  # more usefully via the binary_sensor and text_sensor blocks below.
+  - platform: inputs
+    id: display_handler
+    measured_temp:
+      name: "Water Temperature"
+      id: balboa_water_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
+    set_temp:
+      name: "Set Temperature"
+      id: balboa_set_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 60s
@@ -167,142 +102,156 @@ sensor:
     entity_category: diagnostic
 
 binary_sensor:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    # Heater relay state — read-only; the Balboa board owns this and only
-    # fires when (a) target > current temp AND (b) it's not in safety lockout.
-    # Schema key is `heatstate`; friendly name "Heater Active" preserves the
-    # HA entity_id `binary_sensor.hot_tub_heater_active`.
-    heatstate:
-      name: "Heater Active"
-      id: hot_tub_heater_active
-    # Filter cycle 1 *currently running* (vs. just scheduled).
-    filter1_running:
-      name: "Filter Cycle 1"
-      id: hot_tub_filter1_running
-    # Filter cycle 2 *currently running* — only meaningful if you've enabled it.
-    filter2_running:
-      name: "Filter Cycle 2"
-      id: hot_tub_filter2_running
-    # Circulation pump physically running. On GS501Z this is pump 1 at low
-    # speed when the board has decided it needs to circulate (e.g. during a
-    # filter cycle, freeze protection, or heater call).
-    circulation:
-      name: "Circulation Pump"
-      id: hot_tub_circulation
-    # Heat mode = rest (vs. ready). Rest = only heat during a filter cycle.
-    restmode:
-      name: "Rest Mode"
-      id: hot_tub_restmode
-    # Temperature range high (vs. low). The two preset bands the board uses.
-    highrange:
-      name: "High Range"
-      id: hot_tub_highrange
-    # Protocol heartbeat — true when the ESP is receiving valid frames.
-    # If this drops, the RS485 bus has gone away.
-    connected:
-      name: "Bus Connected"
-      id: hot_tub_bus_connected
-      entity_category: diagnostic
+  - platform: inputs
+    parent_id: display_handler
+    type: heater
+    name: "Heater"
+    id: balboa_heater
+  - platform: inputs
+    parent_id: display_handler
+    type: pump
+    name: "Pump (motor running)"   # NOT "jets pressed" — see comment in esp32-spa.h
+    id: balboa_pump
+  - platform: inputs
+    parent_id: display_handler
+    type: light
+    name: "Light"
+    id: balboa_light
+  - platform: inputs
+    parent_id: display_handler
+    type: blower
+    name: "Blower"
+    id: balboa_blower
 
-switch:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    # GS501Z has one pump driving the jets. The component exposes the
-    # primary pump under the `jet1` key; friendly name "Pump 1" preserves
-    # entity_id `switch.hot_tub_pump_1`. jet2..4, blower, filter2 are
-    # intentionally unexposed (not present on GS501Z).
-    jet1:
-      name: "Pump 1"
-      id: hot_tub_pump1
-
-# Lights live on the dedicated `light:` platform (not switch). HA entity
-# becomes `light.hot_tub_lights` — dashboard refs to switch.hot_tub_lights
-# need updating accordingly.
-light:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    light:
-      name: "Lights"
-      id: hot_tub_lights
-
-# ---------------------------------------------------------------------------
-# Text sensors — read-only state from the board
-# ---------------------------------------------------------------------------
 text_sensor:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    # Board's internal RTC (HH:MM). Used to verify the filter schedule is
-    # firing at the time you think it is. Drifts a few min/week — see the
-    # sync_time button below for one-shot resync.
-    spa_time:
-      name: "Spa Time"
-    # Filter cycle 1 configuration (start time + duration), read from NVRAM.
-    filter1_config:
-      name: "Filter 1 Config"
-    filter2_config:
-      name: "Filter 2 Config"
-    # Most recent fault string (e.g. "Sensors out of sync", "Heater dry").
-    # Empty when healthy.
-    fault_message:
-      name: "Fault Message"
-    fault_log_time:
-      name: "Last Fault Time"
-    # Service nags: filter clean / sanitiser / pH check. Cleared with the
-    # clear_reminder button after you've done the service.
-    reminder:
-      name: "Reminder"
-    # Balboa firmware string.
-    component_version:
-      name: "Spa Firmware"
-      entity_category: diagnostic
+  - platform: inputs
+    parent_id: display_handler
+    type: error_code
+    name: "Error Code"
 
-  # ESPHome diagnostics
-  - platform: version
-    name: "ESPHome Version"
-    entity_category: diagnostic
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-      entity_category: diagnostic
+# ===== Button write outputs =====
+# Each GPIO configured as OUTPUT (defaults LOW at boot). To press a button we
+# turn the output on for ~80 ms then off. The wire stays connected to the spa
+# board's button-sense input through the 1 kΩ resistor — drive HIGH = press,
+# drive LOW = idle (no press). The board reads sustained HIGH for one of its
+# detection cycles (~ms) and registers a press.
+output:
+  - platform: gpio
+    pin: GPIO33
+    id: out_btn_light
+  - platform: gpio
+    pin: GPIO4
+    id: out_btn_jets
+  - platform: gpio
+    pin: GPIO16
+    id: out_btn_blower
+  - platform: gpio
+    pin: GPIO17
+    id: out_btn_temp
 
-# ---------------------------------------------------------------------------
-# Buttons — one-shot actions
-# ---------------------------------------------------------------------------
+# ===== HA-callable buttons (momentary press) =====
 button:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    # Push the ESP's wall clock to the board's RTC. Useful after every
-    # solar-surplus power cycle if the board loses time (see README notes
-    # on the contactor-induced reboot behaviour).
-    sync_time:
-      name: "Sync Time"
-    # Pull the full fault log out of NVRAM into the fault_* text sensors.
-    request_fault_log:
-      name: "Request Fault Log"
-    # Acknowledge the current service reminder. Only press this *after*
-    # actually doing the service — the reminder timer is the board's only
-    # nudge for filter changes.
-    clear_reminder:
-      name: "Clear Reminder"
-    # Toggle filter cycle 2 on/off. Filter 2 is optional; many UK installs
-    # only use filter 1.
-    disable_filter2:
-      name: "Toggle Filter 2"
+  - platform: template
+    name: "Press Light"
+    id: btn_press_light
+    on_press:
+      - output.turn_on: out_btn_light
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_light
+  - platform: template
+    name: "Press Jets"
+    id: btn_press_jets
+    on_press:
+      - output.turn_on: out_btn_jets
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_jets
+  - platform: template
+    name: "Press Blower"
+    id: btn_press_blower
+    on_press:
+      - output.turn_on: out_btn_blower
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_blower
+  - platform: template
+    name: "Press Temp"
+    id: btn_press_temp
+    on_press:
+      - output.turn_on: out_btn_temp
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_temp
+  - platform: template
+    name: "Walk Setpoint to Target Now"
+    id: btn_walk_now
+    on_press:
+      - script.execute: walk_setpoint
 
-# ---------------------------------------------------------------------------
-# Deliberately NOT exposed (writes-to-NVRAM or hardware-irrelevant)
-# ---------------------------------------------------------------------------
-# The component supports these writable text inputs:
-#   - spa_time              (sets the RTC — use the sync_time button instead)
-#   - filter1_start_time    (writes new schedule to NVRAM)
-#   - filter1_duration      (writes new schedule to NVRAM)
-#   - filter2_start_time    (writes new schedule to NVRAM)
-#   - filter2_duration      (writes new schedule to NVRAM)
-# They are intentionally omitted to keep filter cycle logic on the Balboa
-# board, not in HA. Configure filter cycles once via the topside panel and
-# leave them alone. If you ever want HA to own the schedule, uncomment in
-# a future commit — but then back up the current values first.
-#
-# Also unexposed because GS501Z hardware doesn't have them:
-#   pump 2..6, jets 2..4, blower, mister, aux1/2, light 2, multi-speed fans.
+# ===== Closed-loop setpoint controller =====
+# Target temperature exposed as a HA `number` (26-40, integer steps).
+# Setting the number does NOT auto-fire the controller — user must explicitly
+# press `btn_walk_now` to start the walk. This avoids surprising spa-state
+# changes at boot (would otherwise fire if ESPHome restored an initial_value).
+# Original v1 had `initial_value: 36` + `on_value: walk_setpoint` which walked
+# the setpoint on every boot — removed.
+number:
+  - platform: template
+    name: "Target Setpoint"
+    id: target_setpoint
+    optimistic: true
+    min_value: 26
+    max_value: 40
+    step: 1
+    unit_of_measurement: "°${UNITS}"
+    mode: box
+    # No initial_value, no on_value — explicit trigger only via btn_walk_now
+
+# Guard counter for the walk-setpoint loop.
+globals:
+  - id: walk_guard
+    type: int
+    initial_value: '0'
+
+# Ride-the-bounce setpoint walker. Ported from sim/setpoint_sim.py.
+# Algorithm:
+#   1. Press temp button once — wakes set-mode, reveals current setpoint (no
+#      change), decoder will populate balboa_set_temp within ~1.5 s.
+#   2. While decoded set_temp != target (and within safety guard): press,
+#      wait for decoder to catch up, re-check.
+#   3. Stop pressing; spa commits the displayed value after ~3 s of no
+#      presses (set-mode timeout).
+# Convergence: bounce-handling is built into the panel's UI — at a limit it
+# reverses direction. Worst case is ~28 presses (per sim across all
+# start/target/direction combinations); guard at 35.
+script:
+  - id: walk_setpoint
+    mode: restart   # if user changes target mid-walk, restart from scratch
+    then:
+      - logger.log:
+          format: "walk_setpoint: target=%d, starting"
+          args: ['(int) id(target_setpoint).state']
+      - lambda: 'id(walk_guard) = 0;'
+      # Wake press — reveals current setpoint, no change to value
+      - output.turn_on: out_btn_temp
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_temp
+      - delay: ${walk_interpress}   # let decoder pick up the revealed setpoint
+      - while:
+          condition:
+            lambda: |-
+              float current = id(balboa_set_temp).state;
+              // If decoder hasn't populated yet (nan), keep pressing — we
+              // need a reading to compare.
+              if (isnan(current)) return true;
+              // Safety: never exceed worst-case + margin
+              if (id(walk_guard) >= ${walk_max_iters}) return false;
+              return (int) current != (int) id(target_setpoint).state;
+          then:
+            - output.turn_on: out_btn_temp
+            - delay: ${press_pulse}
+            - output.turn_off: out_btn_temp
+            - delay: ${walk_interpress}
+            - lambda: 'id(walk_guard)++;'
+      - logger.log:
+          format: "walk_setpoint: matched (or guard hit), settling. presses=%d"
+          args: ['id(walk_guard)']
+      - delay: ${walk_commit_wait}    # set-mode timeout → spa commits value
+      - logger.log: "walk_setpoint: done"
