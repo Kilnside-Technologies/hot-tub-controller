@@ -4,7 +4,7 @@
 # decode works; decoder.yaml is the WiFi/HA version for later.
 #
 # REQUIRED WIRING (read lines, via 1k/2.2k dividers, tapping J2 in parallel):
-#   data  (white/blue, pin 5) -> GPIO34   clock (orange, pin 6) -> GPIO35
+#   data  (white/blue, pin 5) -> GPIO34   clock (green, pin 6) -> GPIO35
 #   GND   (blue, pin 4) -> ESP GND.  ESP powered from USB.
 
 substitutions:

@@ -1,7 +1,7 @@
 # Raw display-bus capture — logs every DISTINCT frame (to catch brief status
 # flashes) + a clk/s rate. Read over WiFi: browser http://balboa-rawcap.local/
 # ("Frame" = latest distinct frame, "Rate" = clk/s) or `esphome logs` (tags
-# "frame:" and "rawcap:"). Wiring: clock(orange)->GPIO35, data(white/blue)->GPIO34.
+# "frame:" and "rawcap:"). Wiring: clock(green)->GPIO35, data(white/blue)->GPIO34.
 # Mapping workflow: set a state, read Frame; toggle ONE control, read the new Frame.
 
 esphome:

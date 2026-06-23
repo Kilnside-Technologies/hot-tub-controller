@@ -10,8 +10,11 @@
 # !! REWIRE BEFORE FLASHING !! The component HARD-CODES the read pins and also
 # drives GPIO26 as an output, so the clock CANNOT stay on GPIO26.
 #   data  (white/blue, pin 5) -> 1k/2.2k divider -> GPIO34   (input-only)
-#   clock (orange,     pin 6) -> 1k/2.2k divider -> GPIO35   (input-only)
+#   clock (green,      pin 6) -> 1k/2.2k divider -> GPIO35   (input-only)
 #   GND   (blue,       pin 4) -> ESP GND
+# Cable is 568B (verified by continuity 2026-06-23): pin1 white/orange=+5V,
+# pin4 blue=GND, pin5 white/blue=data, pin6 GREEN=clock. The "orange" in older
+# notes was a green/white-green misread — see docs/pinout.md.
 # Panel stays in its own port; tap J2 in parallel. ESP powered from USB.
 
 substitutions:

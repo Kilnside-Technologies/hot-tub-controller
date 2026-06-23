@@ -1,7 +1,7 @@
 # 2-channel diagnostic sniffer on the DECODER's read pins.
 # Use AFTER moving the wires, to confirm clock + data actually reach GPIO34/35:
 #   data  (white/blue, pin 5) -> GPIO34   expect ~42,000/min, jumpy
-#   clock (orange,     pin 6) -> GPIO35   expect ~144,000/min, steady
+#   clock (green,      pin 6) -> GPIO35   expect ~144,000/min, steady
 # Read over WiFi: browser http://balboa-sniff3435.local/ (or the IP), or the
 # "sniff:" log line. Needs esphome/secrets.yaml (same one decoder.yaml uses).
 #

@@ -1,94 +1,88 @@
-# Pinout reference
+# Pinout reference — Balboa GS501Z J2 topside display bus
 
-All pin assignments derive from ccutrer's protocol reverse engineering.
-**Canonical source**:
-https://github.com/ccutrer/balboa_worldwide_app/wiki#physical-layer
+> **This supersedes the old RS485 pinout.** The J2 RJ45 is **not** RS485. It is
+> the proprietary **topside display bus**: a synchronous clock + data serial the
+> mainboard uses to drive the VL260 panel's 7-segment display. The decoder taps
+> it in parallel with the panel. See `git log` for the dead `balboa_spa`/JZK/
+> LM2596 history.
 
-⚠️ **Verify against your specific board** with a multimeter before powering up.
-The Balboa GS series has been wired several different ways across revisions;
-the table below is the most common GS501Z mapping but is **not** a guarantee
-for your specific PCB rev.
+All values below are **verified on our actual hardware** — not from a datasheet.
+The cable was continuity-tested 2026-06-23; the signal mapping is proven by the
+live decoder reading correct water temperature off it.
 
-## Balboa J2 RJ45 — connector pinout
+## The cable — 568B (continuity-verified)
 
-Looking at the **RJ45 socket on the Balboa board** (clip down, contacts
-facing you):
+Our tap is a cut Cat5e patch lead wired to **TIA-568B**. Hold the RJ45 plug with
+the **gold contacts facing you and the cable pointing down** (locking tab on the
+back, hidden) — **pin 1 is on the far left**, pin 8 on the far right.
 
-| Pin | Signal   | Notes |
-|-----|----------|-------|
-| 1   | GND      | |
-| 2   | GND      | |
-| 3   | +12 V    | ~12 V regulated; supplies topside panel + accessories |
-| 4   | RS485 B− | Differential pair B |
-| 5   | RS485 A+ | Differential pair A |
-| 6   | GND      | |
-| 7   | +12 V    | (Same rail as pin 3) |
-| 8   | GND      | |
+| RJ45 pin | 568B colour      | J2 signal | Handling |
+|----------|------------------|-----------|----------|
+| 1        | white / orange   | **+5 V**  | Powers the ESP32 (5V/VIN) when untethered. Metered clean steady 5 V. |
+| 2        | orange           | unused    | dress off |
+| 3        | white / green    | unused    | clock's twisted-pair twin — leave floating (or ground it, see note) |
+| 4        | blue             | **GND**   | → ESP32 GND (mandatory common reference) |
+| 5        | white / blue     | **DATA**  | board→MCU, 5 V → 1k/2.2k divider → **GPIO34** (input-only) |
+| 6        | **green**        | **CLOCK** | board→MCU, 5 V → 1k/2.2k divider → **GPIO35** (input-only). ISR samples DATA on the rising edge. |
+| 7        | white / brown    | unused    | dress off |
+| 8        | brown            | unused    | dress off |
 
-> **Confirm** against ccutrer's wiki — pin numbering for RJ45 can be drawn
-> either "clip down, contacts toward you" or "clip up, looking into socket",
-> which inverts the order. Double-check with a meter against pin 1 of a known
-> good cable before crimping.
+> ⚠️ **Orange/green caution.** The clock wire is **green**, not orange. Early
+> notes mislabelled it "orange" — a green↔white-green misread that caused an
+> hours-long clock/data swap bug. Confirm by the twisted pair: each solid core is
+> twisted with its own white-striped twin (green ↔ white/green, orange ↔
+> white/orange). The clock (green, pin 6) twins with **white/green (pin 3)**.
 
-## Cable (RJ45 patch lead, 568B)
+### Why these pins are certain
 
-Standard 568B colour code in a patch lead carries the J2 signals as:
+- **pin 4 = blue = GND** and **pin 5 = white/blue = data** are the 568B *blue
+  pair* — unmistakable colour, fixes the plug orientation.
+- **pin 1 = white/orange = +5 V** was metered directly.
+- That forces **568B**, so **pin 6 = green = clock** (568A would put orange on
+  pin 6, but then 5 V could not be on white/orange — the cable can't be both).
+- The decoder reads correct temperature with data on GPIO34 / clock on GPIO35,
+  which closes the loop: pin 5 → GPIO34 and pin 6 → GPIO35 are the right signals.
 
-| RJ45 pin | 568B colour      | J2 signal |
-|----------|------------------|-----------|
-| 1        | White / Orange   | GND       |
-| 2        | Orange           | GND       |
-| 3        | White / Green    | +12 V     |
-| 4        | Blue             | RS485 B−  |
-| 5        | White / Blue     | RS485 A+  |
-| 6        | Green            | GND       |
-| 7        | White / Brown    | +12 V     |
-| 8        | Brown            | GND       |
+## ESP32 WROOM-32E — GPIO map (read-only decoder, current)
 
-**Recommendation**: cut one end off a known-568B patch lead, strip the four
-wires you need (pins 3 or 7 = +12 V, any GND pin, pin 4 = B−, pin 5 = A+),
-and dress the rest. Don't use untested CCA (copper-clad aluminium) cable for
-the power conductors — the 3 A topside loads will brown them out.
+| ESP32 pin | Function | Connects to |
+|-----------|----------|-------------|
+| GPIO34    | Display DATA in | J2 pin 5 (white/blue) via 1k series / 2.2k-to-GND divider |
+| GPIO35    | CLOCK in (ISR)  | J2 pin 6 (green) via 1k series / 2.2k-to-GND divider |
+| GND       | Common ground   | J2 pin 4 (blue) **and** divider GND rail |
+| 5V / VIN  | Power (untethered only) | J2 pin 1 (white/orange) — **never with USB connected at the same time** |
+| USB       | Power + flash + logs | bench / OTA |
 
-## ESP32 WROOM-32E — GPIO mapping
+GPIO34/35 are **input-only** (no internal pull-ups — the divider sets the level)
+and are hard-coded in the vendored `components/inputs/` decoder. The component
+also drives some GPIOs as outputs for the future button-write path, so do **not**
+move the clock onto GPIO26.
 
-| ESP32 pin | Function          | Connects to               |
-|-----------|-------------------|---------------------------|
-| 5V        | Power in          | Buck converter OUT+       |
-| GND       | Ground            | Buck converter OUT−, JZK GND |
-| 3V3       | JZK Vcc           | JZK RS485 module VCC      |
-| GPIO16    | UART RX           | JZK TXD (TTL side)        |
-| GPIO17    | UART TX           | JZK RXD (TTL side)        |
+Phase-1 power is **USB only**. Pin 1 (+5 V) is the untethered option for later —
+wire it to 5V/VIN *only* after confirming USB is unplugged (back-feed risk).
 
-GPIO16/17 are chosen because they're the default ESP32 secondary UART (UART2)
-pins and don't conflict with flash/boot strapping.
+## Level shifting
 
-**Do not** use GPIO1 / GPIO3 (UART0) — those are the USB programming UART, and
-attaching RS485 to them will fight the bootloader on every boot.
+Both read lines use the same divider: **1k series** (J2 core → node) + **2.2k to
+GND** (node → GND), node → GPIO. 5 V × 2.2/3.2 ≈ 3.4 V at the pin — within the
+ESP32's tolerance, edges crisp enough for the ~10 µs bus bits. If clock framing
+ever wanders, drop the **clock** divider to 470 Ω / 820 Ω for lower impedance.
 
-## JZK RS485 module
+## Notes / future
 
-The "auto flow control" variant has no DE/RE pin — direction is sensed from
-the start bit on TXD. Pin labels vary by manufacturer but typically:
+- **Clock has no quiet return.** 568B twists data (pin 5) with GND (pin 4) — good
+  — but clock (pin 6) twists with the floating white/green (pin 3). If clock edges
+  ever get jittery, **grounding pin 3** gives the clock a paired return and should
+  clean them up. Not needed today (decoding is stable).
+- **Write path (phase 2):** the panel's single temp button is the setpoint/heat-
+  shed lever — to be driven via a PC817 optocoupler, closed-loop (read the
+  setpoint off the blank-flash, correct direction). Wires into the reserved
+  output GPIOs; no re-layout of the read side.
 
-| Pin     | Connects to                       |
-|---------|-----------------------------------|
-| VCC     | ESP32 3V3 (module is 3.3 V tolerant) |
-| GND     | ESP32 GND                         |
-| TXD     | ESP32 GPIO17 (TX)                 |
-| RXD     | ESP32 GPIO16 (RX)                 |
-| A / A+  | Balboa J2 pin 5 (RS485 A+)        |
-| B / B−  | Balboa J2 pin 4 (RS485 B−)        |
+## Frame format (decode reference)
 
-## LM2596 buck converter
-
-| Pin     | Connects to                                                |
-|---------|------------------------------------------------------------|
-| IN+     | Balboa J2 +12 V (pin 3 or pin 7)                           |
-| IN−     | Balboa J2 GND  (pin 1, 2, 6, or 8)                         |
-| OUT+    | ESP32 5V pin **(only after trimming to 5.0 V on the bench)** |
-| OUT−    | ESP32 GND, JZK GND                                         |
-
-**Bench procedure**: power IN+/IN− from a 12 V supply, multimeter on OUT+/OUT−,
-turn the trim pot until it reads 5.0 V ± 0.05 V, *then* wire it in. The pots
-ship at random factory positions; some have shipped at ~30 V open-circuit.
+24-bit frames, ~50/s, data sampled on clock **rising** edge: p1(7) + p2(7) +
+p3(7) + p4(3). Digits p2/p3 are 7-seg (water temp when steady; setpoint shows
+during the blank-flash of set mode). Status bits (GS501Z): **heater = p1 bit2,
+light = p4 bit0, pump = p4 bit1, blower = p4 bit2**. Startup shows "Pr"
+(priming). Full decode logic lives in `components/inputs/esp32-spa.h`.
