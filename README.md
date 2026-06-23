@@ -172,6 +172,22 @@ bit-map and frame quirks.
   real-world install notes and the photos that helped confirm cable
   colours.
 
+## How this was built (AI disclosure)
+
+Most of the code, docs, firmware configuration, and the protocol decode
+writeups in this repo were written collaboratively with **Anthropic's
+Claude (via Claude Code)**, driven by the repo owner doing all the
+hands-on hardware work — multimeter checks, wiring, panel-button presses,
+verification of every bit assertion against a real GS501Z + VL260.
+Commits tagged `Co-Authored-By: Claude` are the literal product of those
+pair-debugging sessions.
+
+Treat anything in here as you would any AI-assisted work: **read it, test
+it on the bench before pointing it at your own spa, verify any specific
+decoder bit or pin assertion against your own hardware before trusting
+it.** Spa hardware varies; even within the GS501Z line, panel variants
+differ.
+
 ## Safety
 
 - **5 V on the J2 bus is benign to the ESP32 through the 1 kΩ taps** —
