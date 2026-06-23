@@ -1,9 +1,8 @@
-# Raw display-bus capture — ONE flash collects everything:
-#   - is the clock/data signal reaching GPIO35/34 (clk/s, frames)?
-#   - the RAW frame bits (raw, p1..p4) to reverse-engineer the decode.
-# Wiring: clock (orange) -> GPIO35, data (white/blue) -> GPIO34, GND common.
-# Read over WiFi: browser http://balboa-rawcap.local/ ("Capture" line) or
-# `esphome logs esphome/rawcap.yaml` (the "rawcap:" line). Needs secrets.yaml.
+# Raw display-bus capture — logs every DISTINCT frame (to catch brief status
+# flashes) + a clk/s rate. Read over WiFi: browser http://balboa-rawcap.local/
+# ("Frame" = latest distinct frame, "Rate" = clk/s) or `esphome logs` (tags
+# "frame:" and "rawcap:"). Wiring: clock(orange)->GPIO35, data(white/blue)->GPIO34.
+# Mapping workflow: set a state, read Frame; toggle ONE control, read the new Frame.
 
 esphome:
   name: balboa-rawcap
@@ -44,10 +43,18 @@ logger:
 
 text_sensor:
   - platform: template
-    name: "Capture"
-    id: cap_text
+    name: "Frame"
+    id: cap_frame
+  - platform: template
+    name: "Rate"
+    id: cap_rate
 
 interval:
+  - interval: 250ms
+    then:
+      - lambda: |-
+          std::string s = rawcap_drain();
+          if (!s.empty()) id(cap_frame).publish_state(s);
   - interval: 1s
     then:
-      - lambda: "id(cap_text).publish_state(rawcap_report());"
+      - lambda: "id(cap_rate).publish_state(rawcap_summary());"
