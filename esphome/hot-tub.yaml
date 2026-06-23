@@ -41,6 +41,15 @@ substitutions:
 
 esphome:
   name: hot-tub
+  on_boot:
+    # Fire after WiFi + API are up (priority -100 = late in the boot sequence).
+    # Self-heals the "set_temp = unknown after boot until someone interacts" case:
+    # the decoder only sees a setpoint while the panel is in set-mode, and the
+    # spa never enters set-mode on its own. One Temp press wakes set-mode,
+    # decoder catches the value, set_temp populates within ~1.5 s.
+    priority: -100
+    then:
+      - script.execute: capture_setpoint_at_boot
 
 esp32:
   board: esp32dev
@@ -263,3 +272,32 @@ script:
           args: ['id(walk_guard)']
       - delay: ${walk_commit_wait}    # set-mode timeout → spa commits value
       - logger.log: "walk_setpoint: done"
+
+  # One-shot setpoint capture at boot. Waits for the spa to come out of priming
+  # (decoder reporting a real water temperature = bus alive + numeric display
+  # restored) then sends a single Temp press to reveal the current setpoint.
+  # Without this, set_temp stays "unknown" in HA until the user (or HA
+  # automation) interacts — which broke the "what's my current setpoint?"
+  # question for the first N minutes after every boot.
+  - id: capture_setpoint_at_boot
+    then:
+      - delay: 45s    # priming cycle is ~30-60s; conservative wait
+      - wait_until:
+          condition:
+            lambda: 'return !isnan(id(balboa_water_temp).state);'
+          timeout: 120s
+      - logger.log: "boot: priming complete, capturing setpoint via single Temp press"
+      - output.turn_on: out_btn_temp
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_temp
+
+# Periodic setpoint refresh — every 30 min press Temp once to wake set-mode
+# and let the decoder re-capture the setpoint. Belt-and-braces against HA
+# missing a refresh (HA-side automation does the same job; either is enough).
+interval:
+  - interval: 30min
+    then:
+      - logger.log: "periodic: refreshing setpoint via single Temp press"
+      - output.turn_on: out_btn_temp
+      - delay: ${press_pulse}
+      - output.turn_off: out_btn_temp
