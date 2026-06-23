@@ -1,0 +1,110 @@
+# Balboa J2 BUTTON-line sniffer — bench bring-up tool (not the final firmware).
+#
+# Purpose: find which of J2's button cores corresponds to which panel button
+# (Warm / Cool / Light / Jets), and its idle polarity, by PASSIVELY watching
+# the line while the panel button is physically pressed. The board drives the
+# button bus; we observe.
+#
+# Why not the pulse_counter sniffer? That one finds high-frequency lines
+# (clock, display data). Button presses are slow single events — we want the
+# logic LEVEL (idle high vs idle low) and to log STATE CHANGES on a press.
+#
+# Wiring (568B cable, continuity-verified 2026-06-23):
+#   Spa GND (blue, pin 4)              -> ESP GND          (mandatory common ref)
+#   Pin 1 (white/orange, +5V)          -> NOT connected
+#   Pin 2 (orange)        -> 1k–2.2k   -> GPIO33
+#   Pin 3 (white/green)   -> 1k–2.2k   -> GPIO4
+#   Pin 7 (white/brown)   -> 1k–2.2k   -> GPIO16
+#   Pin 8 (brown)         -> 1k–2.2k   -> GPIO17
+# Series resistor only — NO leg to ground. We must not load the button bus;
+# the board's own pull (if any) sets the idle level we're trying to read.
+#
+# Pins were chosen to avoid the decoder's claims:
+#   GPIO34/35 = decoder data/clock inputs
+#   GPIO25/26/27/32 = decoder button OUTPUTS (kgstorm component reservations)
+# None of GPIO33/4/16/17 are strapping pins, so a HIGH at boot won't brick.
+#
+# Method:
+#   1. Flash. Open http://balboa-button-sniffer.local/ on a phone, or watch
+#      `esphome logs esphome/button-sniffer.yaml` over WiFi.
+#   2. Read the IDLE state of all four pins (the periodic "btnstate" log line).
+#      Note which are HIGH and which are LOW with nothing pressed.
+#   3. Physically press each panel button in turn (Warm / Cool / Light / Jets),
+#      hold ~1 s, release. Watch which channel(s) toggle and which direction.
+#         idle HIGH -> press goes LOW   = button shorts the line to GND  (active-low)
+#         idle LOW  -> press goes HIGH  = button pulls the line to +5V   (active-high)
+#         no change anywhere            = bus is scanned, not steady; talk to me
+#   4. Record pin + polarity per button. That's the wiring spec for the
+#      optocoupler (or relay, or jumper) write path.
+
+esphome:
+  name: balboa-button-sniffer
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "balboa-button-sniffer-fallback"
+    password: !secret ota_password
+
+captive_portal:
+
+api:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+
+logger:
+  level: INFO
+  baud_rate: 115200
+
+binary_sensor:
+  - platform: gpio
+    name: "Pin 2 orange"
+    id: btn_p2
+    pin:
+      number: GPIO33
+      mode:
+        input: true
+  - platform: gpio
+    name: "Pin 3 white-green"
+    id: btn_p3
+    pin:
+      number: GPIO4
+      mode:
+        input: true
+  - platform: gpio
+    name: "Pin 7 white-brown"
+    id: btn_p7
+    pin:
+      number: GPIO16
+      mode:
+        input: true
+  - platform: gpio
+    name: "Pin 8 brown"
+    id: btn_p8
+    pin:
+      number: GPIO17
+      mode:
+        input: true
+
+# Periodic dump of all four levels — easy to spot the idle pattern even if
+# nothing is being pressed. State CHANGES also log automatically (binary_sensor
+# default), so a press shows up as a separate log line.
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          ESP_LOGI("btnstate",
+            "p2=%d  p3=%d  p7=%d  p8=%d",
+            (int) id(btn_p2).state, (int) id(btn_p3).state,
+            (int) id(btn_p7).state, (int) id(btn_p8).state);

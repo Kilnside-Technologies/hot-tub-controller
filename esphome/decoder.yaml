@@ -1,0 +1,110 @@
+# Balboa VL260 display-bus DECODER — bench test.
+#
+# Reads the topside display bus (tapped on J2 in parallel with the panel) and
+# decodes water temp + set temp + heater/pump/light + error code.
+#
+# Component vendored under esphome/components/inputs/ from
+#   github.com/kgstorm/Balboa-GS100-with-VL260-topside  (esp32-spa/inputs)
+#   — credit: kgstorm. Same VL260 panel as ours.
+#
+# !! REWIRE BEFORE FLASHING !! The component HARD-CODES the read pins and also
+# drives GPIO26 as an output, so the clock CANNOT stay on GPIO26.
+#   data  (white/blue, pin 5) -> 1k/2.2k divider -> GPIO34   (input-only)
+#   clock (green,      pin 6) -> 1k/2.2k divider -> GPIO35   (input-only)
+#   GND   (blue,       pin 4) -> ESP GND
+# Cable is 568B (verified by continuity 2026-06-23): pin1 white/orange=+5V,
+# pin4 blue=GND, pin5 white/blue=data, pin6 GREEN=clock. The "orange" in older
+# notes was a green/white-green misread — see docs/pinout.md.
+# Panel stays in its own port; tap J2 in parallel. ESP powered from USB.
+
+substitutions:
+  UNITS: "C"            # spa display is in °C (UK); this is just the label
+
+esphome:
+  name: balboa-decoder  # distinct from the deployed "hot-tub" node
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf       # the kgstorm component uses the IDF GPIO/ISR API
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "balboa-decoder-fallback"
+    password: !secret ota_password
+
+captive_portal:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+
+# Browser readout over WiFi: open http://balboa-decoder.local/ (or the IP) on
+# any device incl. a phone, to watch the decoded values live.
+web_server:
+  port: 80
+
+# Local component (vendored kgstorm 'inputs' decoder)
+external_components:
+  - source:
+      type: local
+      path: components
+
+# ===== Display decode =====
+sensor:
+  - platform: inputs
+    id: display_handler
+    measured_temp:
+      name: "Water Temperature"
+      id: balboa_water_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
+    set_temp:
+      name: "Set Temperature"
+      id: balboa_set_temp
+      unit_of_measurement: "°${UNITS}"
+      accuracy_decimals: 0
+      device_class: temperature
+
+binary_sensor:
+  - platform: inputs
+    parent_id: display_handler
+    type: heater
+    name: "Heater"
+    id: balboa_heater
+  - platform: inputs
+    parent_id: display_handler
+    type: pump
+    name: "Pump"
+  - platform: inputs
+    parent_id: display_handler
+    type: light
+    name: "Light"
+  - platform: inputs
+    parent_id: display_handler
+    type: blower
+    name: "Blower"
+
+text_sensor:
+  - platform: inputs
+    parent_id: display_handler
+    type: error_code
+    name: "Error Code"
+
+# Clean readout in `esphome logs` (over WiFi) too — look for "decode:".
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          ESP_LOGI("decode", "water=%.1f  set=%.1f  heater=%d",
+            id(balboa_water_temp).state, id(balboa_set_temp).state,
+            (int) id(balboa_heater).state);
