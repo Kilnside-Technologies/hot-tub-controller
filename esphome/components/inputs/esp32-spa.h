@@ -205,7 +205,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
       {0b0010101, 'n'}  // n (segments c,e,g)
     };
 
-    // Prefer letter matches only (we intentionally avoid returning digits here)
+    // Letter matches first
     for (auto &p : letters) {
       if (seg == p.first) return p.second;
     }
@@ -214,6 +214,25 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     uint8_t rev = 0;
     for (int i = 0; i < 7; ++i) rev |= ((seg >> i) & 0x1) << (6 - i);
     for (auto &p : letters) if (rev == p.first) return p.second;
+
+    // Digit matches — needed for F-series fault codes (F1, F2, F3, F6, etc.)
+    // The temperature decode path uses `decode_7seg()` directly; this function
+    // is only called on the error-code path when temp didn't decode, so
+    // returning digits here doesn't collide with temp decoding.
+    static const uint8_t digit_map[10] = {
+      0b1111110, // 0
+      0b0110000, // 1
+      0b1101101, // 2
+      0b1111001, // 3
+      0b0110011, // 4
+      0b1011011, // 5  (same pattern as 'S' — already handled above as letter)
+      0b1011111, // 6
+      0b1110000, // 7
+      0b1111111, // 8
+      0b1110011  // 9
+    };
+    for (uint8_t d = 0; d < 10; ++d) if (seg == digit_map[d]) return static_cast<char>('0' + d);
+    for (uint8_t d = 0; d < 10; ++d) if (rev == digit_map[d]) return static_cast<char>('0' + d);
 
     return '\0';
   }
@@ -232,6 +251,15 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     if (code == "LF") return "recurring low flow";
     if (code == "dr") return "low flow";
     if (code == "dY") return "Low water";
+    // GS501Z F-series fault codes — observed live but exact meanings TBD,
+    // see the Balboa GS501Z label sheet / manual for the authoritative list.
+    if (code == "F1") return "F1 — see GS501Z manual";
+    if (code == "F2") return "F2 — see GS501Z manual";
+    if (code == "F3") return "F3 — see GS501Z manual";
+    if (code == "F4") return "F4 — see GS501Z manual";
+    if (code == "F5") return "F5 — see GS501Z manual";
+    if (code == "F6") return "F6 — see GS501Z manual";
+    if (code == "F7") return "F7 — see GS501Z manual";
     return nullptr;
   }
 
