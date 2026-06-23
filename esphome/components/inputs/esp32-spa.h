@@ -71,6 +71,10 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
   // Pump & light stability (derived from p4 bits)
   int8_t candidate_pump = -1; uint8_t stable_pump = 0;
   int8_t candidate_light = -1; uint8_t stable_light = 0;
+  // Blower stability (p4 bit2). Added 2026-06-23 — earlier "no filter needed,
+  // toggles rarely" assumption was wrong; bit2 flickers spuriously during
+  // normal display frames and spams ON/OFF events. Filter mirrors pump/light.
+  int8_t candidate_blower = -1; uint8_t stable_blower = 0;
 
   // Sensors for temperature readings
   esphome::sensor::Sensor *measured_temp_sensor_ = nullptr;
@@ -78,16 +82,24 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
   // Text sensor for error codes
   esphome::text_sensor::TextSensor *error_text_sensor_ = nullptr;
 
-  // Binary sensors for discrete states
-  esphome::binary_sensor::BinarySensor *heater_sensor_ = nullptr;  // derived from p1 bit5
-  esphome::binary_sensor::BinarySensor *pump_sensor_ = nullptr;    // derived from p4 bit0
-  esphome::binary_sensor::BinarySensor *light_sensor_ = nullptr;   // derived from p4 bit1
-  esphome::binary_sensor::BinarySensor *blower_sensor_ = nullptr;  // GS501Z: derived from p4 bit2
+  // Binary sensors for discrete states.
+  // GS501Z bit map (verified 2026-06-23 via rawcap + live cycle):
+  //   heater = p1 bit2
+  //   light  = p4 bit0   (clean toggle on light-button press)
+  //   pump   = p4 bit1   ("motor running" — binary; doesn't distinguish
+  //                      circ-low vs jets-high. Once circ auto-starts after
+  //                      boot, bit1 stays 1. NOT a "jets pressed" bit.)
+  //   blower = p4 bit2   (needs stability filter — see candidate_blower)
+  esphome::binary_sensor::BinarySensor *heater_sensor_ = nullptr;
+  esphome::binary_sensor::BinarySensor *pump_sensor_ = nullptr;
+  esphome::binary_sensor::BinarySensor *light_sensor_ = nullptr;
+  esphome::binary_sensor::BinarySensor *blower_sensor_ = nullptr;
 
   // Last published discrete states
   int8_t last_heater = -1;  // -1=unknown, otherwise 0/1
   int8_t last_pump = -1;    // -1=unknown, otherwise 0/1
   int8_t last_light = -1;   // -1=unknown, otherwise 0/1
+  int8_t last_blower = -1;  // -1=unknown, otherwise 0/1
   // Last published error code (string)
   std::string last_error_code_ = "";
   // Error code stability tracking
@@ -584,13 +596,18 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     int8_t cur_heater = static_cast<int8_t>((p1_bits >> 2) & 0x1);
     int8_t cur_pump = static_cast<int8_t>((p4 >> 1) & 0x1);   // GS501Z: pump = p4 bit1
     int8_t cur_light = static_cast<int8_t>((p4 >> 0) & 0x1);  // GS501Z: light = p4 bit0
-    {  // GS501Z: blower = p4 bit2 — publish on change (toggles rarely, no stability needed)
-      static int8_t last_blower = -1;
-      int8_t cur_blower = static_cast<int8_t>((p4 >> 2) & 0x1);
-      if (blower_sensor_ && cur_blower != last_blower) {
-        blower_sensor_->publish_state(static_cast<bool>(cur_blower));
-        last_blower = cur_blower;
-      }
+    // GS501Z: blower = p4 bit2. Needs stability filter (mirrors pump/light) —
+    // bit2 flickers spuriously during some normal frames; without the filter
+    // we get ON/OFF log spam at idle. last_blower is now a member, not static
+    // local (so it can be inspected/reset like the other sensors).
+    int8_t cur_blower = static_cast<int8_t>((p4 >> 2) & 0x1);
+    if (candidate_blower == cur_blower) { if (stable_blower < 255) stable_blower++; }
+    else { candidate_blower = cur_blower; stable_blower = 1; }
+    bool blower_ok = (stable_blower >= STABLE_THRESHOLD);
+    int8_t pub_blower = blower_ok ? candidate_blower : last_blower;
+    if (pub_blower != last_blower) {
+      if (blower_sensor_) { blower_sensor_->publish_state(static_cast<bool>(pub_blower)); }
+      last_blower = pub_blower;
     }
 
     // Update heater stability (existing)
