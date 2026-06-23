@@ -322,7 +322,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
       const uint8_t checksum_mask = 0x4B;  // 0b1001011 (mask bits 6,3,1,0)
       const uint8_t checksum_val  = 0x00;  // expected zeros in masked bits
       const uint8_t p4_mask = 0x1;        // require p4 LSB == 0
-      if ((p1 & checksum_mask) != checksum_val || (p4 & p4_mask) != 0) {
+      if ((p1 & checksum_mask) != checksum_val) {   // GS501Z: p4 bit0 is the light bit, not a checksum
         ESP_LOGW(TAG, "Heartbeat: stored frame fails checksum (p1 masked=0x%02X expected=0x%02X, p4_lsb=0x%X expected=0x0), not publishing",
                 static_cast<unsigned>(p1 & checksum_mask), static_cast<unsigned>(checksum_val), static_cast<unsigned>(p4 & p4_mask));
         return;
@@ -338,8 +338,8 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
       // Heartbeat: publish binary sensor states as well
       // Heater is on bit 2 of p1 (observed from hardware)
       int heater_val = static_cast<int>((p1 >> 2) & 0x1);
-      int pump_val = static_cast<int>((p4 >> 2) & 0x1);
-      int light_val = static_cast<int>((p4 >> 1) & 0x1);
+      int pump_val = static_cast<int>((p4 >> 1) & 0x1);   // GS501Z: pump = p4 bit1
+      int light_val = static_cast<int>((p4 >> 0) & 0x1);  // GS501Z: light = p4 bit0
 
       // Log at info level so this appears even when debug is off
       ESP_LOGI(TAG, "Heartbeat publish: temp=%d set=%d status=0x%X heater=%d pump=%d light=%d", temp, last_set_temp, static_cast<unsigned>(p4), heater_val, pump_val, light_val);
@@ -402,7 +402,7 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     const uint8_t checksum_mask = 0x4B;  // 0b1001011 (mask bits 6,3,1,0)
     const uint8_t checksum_val  = 0x00;  // expected zeros in masked bits
     const uint8_t p4_mask = 0x1;        // require p4 LSB == 0
-    if ((p1 & checksum_mask) != checksum_val || (p4 & p4_mask) != 0) {
+    if ((p1 & checksum_mask) != checksum_val) {   // GS501Z: p4 bit0 is the light bit, not a checksum
       ESP_LOGW(TAG, "Frame fails checksum (p1 masked=0x%02X expected=0x%02X, p4_lsb=0x%X), ignoring",
                 static_cast<unsigned>(p1 & checksum_mask), static_cast<unsigned>(checksum_val), static_cast<unsigned>(p4 & p4_mask));
       // Treat as non-existent frame
@@ -578,8 +578,8 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
     // Always update binary sensors from p4 and p1 with per-bit stability
     uint8_t p1_bits = p1;
     int8_t cur_heater = static_cast<int8_t>((p1_bits >> 2) & 0x1);
-    int8_t cur_pump = static_cast<int8_t>((p4 >> 2) & 0x1);
-    int8_t cur_light = static_cast<int8_t>((p4 >> 1) & 0x1);
+    int8_t cur_pump = static_cast<int8_t>((p4 >> 1) & 0x1);   // GS501Z: pump = p4 bit1
+    int8_t cur_light = static_cast<int8_t>((p4 >> 0) & 0x1);  // GS501Z: light = p4 bit0
 
     // Update heater stability (existing)
     if (candidate_heater == cur_heater) { if (stable_heater < 255) stable_heater++; } else { candidate_heater = cur_heater; stable_heater = 1; }
