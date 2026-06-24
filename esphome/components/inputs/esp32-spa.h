@@ -62,6 +62,13 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
   int16_t pending_measured_temp = -1;        // -1 = none pending
   uint32_t pending_measured_since = 0;       // time when pending started (ms)
   static constexpr uint32_t MEASURE_PUBLISH_DELAY_MS = 500;  // delay before publishing measured temp (ms)
+  // Boot/priming suppress: on power-up the panel shows the cold stagnant manifold temp
+  // until the purge pump circulates warm bulk water across the probe. It reads stably
+  // WRONG (~24C, then snaps to the true ~34C) for ~2 min — measured: settles ~123s after
+  // boot. The stability filter can't catch it because the cold value is itself stable, so
+  // gate measured-temp publishes on time-since-boot to keep the priming reading from
+  // escaping into HA/BigQuery as a real temperature.
+  static constexpr uint32_t BOOT_MEASURE_SUPPRESS_MS = 180000;  // 180s (> ~123s observed settle)
 
   // Stability tracking (counters and candidates)
   int16_t candidate_temp = -2; uint8_t stable_temp = 0;
@@ -600,15 +607,25 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
           pending_measured_since = now;
           ESP_LOGD(TAG, "Measured temp candidate %d pending, waiting %ums to ensure not set-mode", display_candidate, static_cast<unsigned>(MEASURE_PUBLISH_DELAY_MS));
         } else if ((now - pending_measured_since) >= MEASURE_PUBLISH_DELAY_MS) {
-          // Timer elapsed and still not in set mode -> publish
-          last_measured_temp = pending_measured_temp;
-          if (measured_temp_sensor_) {
-            measured_temp_sensor_->publish_state(static_cast<float>(last_measured_temp));
-            ESP_LOGD(TAG, "Publishing measured temp: %d", last_measured_temp);
+          if (now < BOOT_MEASURE_SUPPRESS_MS) {
+            // Still inside the boot/priming window: the display shows the cold
+            // manifold temp, not the circulated bulk water. Don't let it out. Keep
+            // the pending state so the real bulk reading publishes via the path
+            // below once the window passes and the candidate has updated.
+            ESP_LOGD(TAG, "Suppressing measured temp %d in boot priming window (%ums < %ums)",
+                     pending_measured_temp, static_cast<unsigned>(now),
+                     static_cast<unsigned>(BOOT_MEASURE_SUPPRESS_MS));
+          } else {
+            // Timer elapsed and still not in set mode -> publish
+            last_measured_temp = pending_measured_temp;
+            if (measured_temp_sensor_) {
+              measured_temp_sensor_->publish_state(static_cast<float>(last_measured_temp));
+              ESP_LOGD(TAG, "Publishing measured temp: %d", last_measured_temp);
+            }
+            last_publish_time = now;
+            pending_measured_temp = -1;
+            pending_measured_since = 0;
           }
-          last_publish_time = now;
-          pending_measured_temp = -1;
-          pending_measured_since = 0;
         }
       }
     } else {
