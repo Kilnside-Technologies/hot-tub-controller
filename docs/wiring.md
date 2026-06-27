@@ -2,76 +2,88 @@
 
 Two distinct wiring jobs:
 
-1. **Low voltage** — ESP32 + RS485 + buck converter, all powered from the
-   Balboa J2 RJ45 panel port. Reversible, safe to experiment with.
+1. **Low voltage** — ESP32 tapped onto the Balboa J2 topside-display bus and
+   powered from the J2 +5 V. Reversible, safe to experiment with.
 2. **Mains** — Shelly EM Gen3 + 40 A contactor inline with the tub's incoming
    230 V supply. **Part P notifiable in the UK** — get a competent person.
 
-Pin assignments (J2, ESP32 GPIO, JZK module) live in [pinout.md](pinout.md);
-this file is the install procedure.
+Pin assignments (J2 RJ45, ESP32 GPIO) live in [pinout.md](pinout.md); this file
+is the install procedure.
 
 ---
 
-## 1. Low voltage — ESP32 + RS485
+## 1. Low voltage — ESP32 on the J2 display bus
+
+> The J2 RJ45 is the **topside display bus**, not RS485. There is **no buck
+> converter, no RS485 transceiver, and no optocoupler** — the earlier design
+> that used all three was the wrong-protocol theory (see `git log`). The ESP32
+> taps the bus directly through resistors and is powered from J2's own +5 V.
 
 ### Parts laid out
 
 ```
    Balboa GS501Z
    ┌───────────┐
-   │   J2 ─────┼─── RJ45 patch lead ─── (4 wires used: 12 V, GND, A+, B−)
-   └───────────┘                                │
-                                                ▼
-                                        ┌──────────────┐      ┌──────────┐
-                                        │ LM2596 buck  │      │   JZK    │
-                                  12 V─►│ IN  →  OUT   │─5 V─►│  RS485   │
-                                  GND──►│              │─GND─►│ module   │
-                                        └──────────────┘      └────┬─────┘
-                                                                   │ TTL: TXD/RXD
-                                                                   ▼
-                                                            ┌──────────────┐
-                                                            │   ESP32      │
-                                                            │  WROOM-32E   │
-                                                            └──────────────┘
+   │   J2 ─────┼─ RJ45 patch lead (568B) ─ 6 wires used:
+   └───────────┘
+        pin 1  +5 V  ───────────────────────────► ESP32 5V/VIN
+        pin 4  GND   ───────────────────────────► ESP32 GND + divider GND
+        pin 5  DATA  ─[1k]─┬───────────────────► GPIO34   (2.2k node→GND)
+        pin 6  CLOCK ─[1k]─┬───────────────────► GPIO35   (2.2k node→GND)
+        pin 2  Light ─[1k]──────────────────────► GPIO33
+        pin 3  Jets  ─[1k]──────────────────────► GPIO4
+        pin 7  Blower─[1k]──────────────────────► GPIO16
+        pin 8  Temp  ─[1k]──────────────────────► GPIO17
+
+                 ┌──────────────┐  + DS18B20 ×2  → GPIO32 (4.7k pull-up to 3V3)
+                 │   ESP32       │  + DHT11       → GPIO13
+                 │  WROOM-32E    │  + reed (lid)  → GPIO14 ↔ GND
+                 └──────────────┘
 ```
 
 ### Step by step
 
 1. **Crimp / strip the J2 patch lead.** Cut one end off a Cat5e patch lead.
-   Strip back ~50 mm and identify the four pairs by 568B colour
-   (see [pinout.md](pinout.md)). You need:
-   - Pin 3 or 7 (white/green or white/brown) — **+12 V**
-   - Any of pins 1/2/6/8 — **GND**
-   - Pin 5 (white/blue) — **RS485 A+**
-   - Pin 4 (blue) — **RS485 B−**
-2. **Bench-trim the LM2596 to 5.0 V** with a 12 V supply and a multimeter
-   on OUT+. Lock the trim pot with a dab of nail varnish once set. **Do not
-   skip this step** — factory trim pots have been observed at >20 V.
-3. **Wire the buck**: J2 +12 V → LM2596 IN+, J2 GND → LM2596 IN−.
-4. **Wire the ESP32 power**: LM2596 OUT+ → ESP32 5V, LM2596 OUT− → ESP32 GND.
-   Power on with the multimeter still on the 5 V rail — confirm the ESP32
-   boot lights come on and the rail stays at 5 V (no sag).
-5. **Wire the JZK module**:
-   - VCC → ESP32 3V3
-   - GND → ESP32 GND
-   - TXD → ESP32 GPIO16 (RX)
-   - RXD → ESP32 GPIO17 (TX)
-   - A / A+ → J2 RS485 A+ (pin 5)
-   - B / B− → J2 RS485 B− (pin 4)
-6. **Confirm orientation** before plugging into J2. The RJ45 lead from the
-   Balboa must be the correct way round — see commissioning.md step 1 for
-   the bus-sniff sanity check.
+   Strip back ~50 mm and identify the wires by 568B colour (see
+   [pinout.md](pinout.md)). Hold the plug gold-contacts-toward-you, cable down:
+   pin 1 is far left.
+2. **Build the two read dividers.** For DATA (pin 5) and CLOCK (pin 6): a 1 kΩ
+   in series from the J2 core to the GPIO node, plus a 2.2 kΩ from that node to
+   GND. This drops the bus's 5 V swing to ~3.4 V — safe for the ESP32 inputs.
+   - pin 5 (white/blue) → 1k → **GPIO34**, with 2.2k node→GND
+   - pin 6 (green) → 1k → **GPIO35**, with 2.2k node→GND
+3. **Wire the four button taps.** Each through a single 1 kΩ series resistor
+   straight to its GPIO (no divider, no opto — see pinout.md for why):
+   - pin 2 (orange) → 1k → **GPIO33** (Light)
+   - pin 3 (white/green) → 1k → **GPIO4** (Jets)
+   - pin 7 (white/brown) → 1k → **GPIO16** (Blower)
+   - pin 8 (brown) → 1k → **GPIO17** (Temp)
+4. **Wire ground:** pin 4 (blue) → ESP32 GND, and tie the divider GND rail to
+   the same point. A solid common ground is mandatory.
+5. **Power:** on the bench, power the ESP32 over **USB** (flash + logs). For the
+   untethered install, wire pin 1 (white/orange, +5 V) → ESP32 **5V/VIN**.
+   **Never have USB and the J2 +5 V connected at the same time** (back-feed).
+6. **Sensors (in the firmware, wire if fitted):**
+   - DS18B20 ×2 (water + ambient): data → **GPIO32** with a 4.7 kΩ pull-up to
+     3V3; VCC → 3V3, GND → GND. Both probes share the one bus.
+   - DHT11 (cabinet): data → **GPIO13**, VCC → 3V3, GND → GND.
+   - Reed lid switch: one side → **GPIO14**, other → GND (internal pull-up in
+     software; magnet on the lid, reed body on the cabinet rim).
+7. **Confirm before plugging into J2.** Sanity-check the bus with the bench
+   decoder first — see [commissioning.md](commissioning.md) step 1.
 
 ### Mounting
 
-The ESP32 + buck + JZK want to live somewhere dry and warm-but-not-hot
-inside the cabinet. Common pattern:
+The ESP32 wants to live somewhere dry and warm-but-not-hot inside the cabinet.
+Common pattern:
 
 - 3D-printed box on a rail or velcro'd to a cabinet wall.
 - Cable gland or RJ45 keystone for the J2 lead.
-- Keep the antenna **clear of the equipment plate** — these are metal and
-  kill 2.4 GHz. A pigtail to a small external SMA antenna on the cabinet
-  panel works well.
+- Keep the antenna **clear of the equipment plate** — these are metal and kill
+  2.4 GHz. Measured in this cabinet: a bare ESP32-C3 Super Mini read ~−80 dBm
+  (marginal, drops), a WROOM-32E ~−62 dBm (solid) — use the WROOM, and if a
+  metal enclosure still hurts it, a pigtail to a small external SMA antenna on
+  the cabinet panel works well.
 
 ---
 

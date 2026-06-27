@@ -2,9 +2,13 @@
 #
 # Compute when to start heating so the tub reaches `target_temp` by
 # `ready_by_time`, based on:
-#   - current water temperature (sensor.cabin_hot_tub_water_temperature)
+#   - current water temperature (sensor.hot_tub_water_temperature)
 #   - 3 kW Incoloy heater element (GS501Z)
 #   - heating rate ≈ 1 °C per 12 min per 1000 L
+#
+# There is no climate entity — the target is set via number.hot_tub_target_setpoint
+# (integer, 26–40) and applied by pressing
+# button.hot_tub_walk_setpoint_to_target_now.
 #
 # CONFIRM: set `tub_volume_l` in the variables block below to your actual
 # tub volume. The default is a placeholder — most domestic 5–6 seat tubs
@@ -24,14 +28,14 @@ hot_tub_preheat:
   mode: single
   fields:
     target_temp:
-      description: "Target water temperature in °C (10–40)."
+      description: "Target water temperature in °C (26–40)."
       example: 38
       required: true
       selector:
         number:
-          min: 10
+          min: 26
           max: 40
-          step: 0.5
+          step: 1
           unit_of_measurement: "°C"
     ready_by_time:
       description: "Time the tub should be at target (HH:MM:SS, today or tomorrow)."
@@ -45,7 +49,7 @@ hot_tub_preheat:
     tub_volume_l: 1300
     # Heating rate model: 1 °C per 12 min per 1000 L => minutes per °C scales linearly.
     minutes_per_degree: "{{ (12 * (tub_volume_l / 1000)) | float }}"
-    current_temp: "{{ states('sensor.cabin_hot_tub_water_temperature') | float(default=20) }}"
+    current_temp: "{{ states('sensor.hot_tub_water_temperature') | float(default=20) }}"
     delta_c: "{{ [(target_temp | float) - current_temp, 0] | max }}"
     heat_minutes: "{{ (delta_c * (minutes_per_degree | float)) | round(0, 'ceil') }}"
 
@@ -80,18 +84,20 @@ hot_tub_preheat:
       timeout: "24:00:00"
       continue_on_timeout: false
 
-    # 4. Engage contactor and set climate.
+    # 4. Engage contactor, set the target setpoint, and walk the panel to it.
     - service: switch.turn_on
       target:
         entity_id: switch.hot_tub_contactor
     - delay:
         seconds: 30
-    - service: climate.set_temperature
+    - service: number.set_value
       target:
-        entity_id: climate.cabin_hot_tub_climate
+        entity_id: number.hot_tub_target_setpoint
       data:
-        temperature: "{{ target_temp }}"
-        hvac_mode: heat
+        value: "{{ target_temp | int }}"
+    - service: button.press
+      target:
+        entity_id: button.hot_tub_walk_setpoint_to_target_now
     - service: notify.notify
       data:
         title: "Hot tub: pre-heating"

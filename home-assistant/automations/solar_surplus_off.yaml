@@ -1,14 +1,20 @@
 # Solar surplus -> hot tub OFF
 #
-# Pair to solar_surplus_on.yaml. Drop target to the climate minimum first
-# (so the heater stops drawing before we cut mains, avoiding contactor
-# arcing under load), wait, then de-energise the contactor.
+# Pair to solar_surplus_on.yaml. Drop the target to its floor first (so the
+# heater stops drawing before we cut mains, avoiding contactor arcing under
+# load), wait, then de-energise the contactor.
+#
+# There is no climate entity — set number.hot_tub_target_setpoint and press
+# button.hot_tub_walk_setpoint_to_target_now. Note the setpoint floor is 26 °C
+# (the firmware's number min), not 10 — walking to 26 stops heating in practice
+# since in-use water is always warmer than 26 °C; the contactor cut is the real
+# off.
 
 - id: hot_tub_solar_surplus_off
   alias: "Hot Tub: solar surplus OFF"
   description: >
     Stand the tub down when Solis export drops below 500 W for 10 minutes.
-    Drops target to 10 °C (stop heating) before opening the contactor.
+    Drops target to the 26 °C floor (stop heating) before opening the contactor.
   mode: single
   max_exceeded: silent
 
@@ -26,16 +32,19 @@
       state: "on"
 
   action:
-    # 1. Tell the Balboa to stop heating. This cuts the 3 kW element draw
-    #    *before* we open the contactor, so the contacts open dry.
-    - service: climate.set_temperature
+    # 1. Tell the Balboa to stop heating by walking the setpoint to its floor.
+    #    This cuts the 3 kW element draw *before* we open the contactor, so the
+    #    contacts open dry.
+    - service: number.set_value
       target:
-        entity_id: climate.cabin_hot_tub_climate
+        entity_id: number.hot_tub_target_setpoint
       data:
-        temperature: 10
-        hvac_mode: heat
+        value: 26
+    - service: button.press
+      target:
+        entity_id: button.hot_tub_walk_setpoint_to_target_now
 
-    # 2. Wait for heater to finish its in-flight cycle and the Balboa to settle.
+    # 2. Wait for the heater to finish its in-flight cycle and the Balboa to settle.
     - delay:
         minutes: 2
 
@@ -49,4 +58,4 @@
         title: "Hot tub: standing down"
         message: >
           Solar export dropped to {{ states('sensor.solis_grid_exported_power') }} W.
-          Final water temp {{ states('sensor.cabin_hot_tub_water_temperature') }} °C.
+          Final water temp {{ states('sensor.hot_tub_water_temperature') }} °C.

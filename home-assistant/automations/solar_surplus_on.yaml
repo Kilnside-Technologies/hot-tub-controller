@@ -1,15 +1,18 @@
 # Solar surplus -> hot tub ON
 #
 # Drop into a packages: file, or copy into automations.yaml under the
-# automation: list. Entity IDs below assume the ESPHome device renamed in
-# HA to "Cabin Hot Tub" (so HA entities are `cabin_hot_tub_*`) and a
-# Shelly EM Gen3 named `hot_tub_contactor` for its switch entity.
+# automation: list. Entity IDs below assume the ESPHome device `hot-tub`
+# (HA entities `hot_tub_*`) and a Shelly contactor relay `hot_tub_contactor`.
+#
+# There is no climate entity — set the target via number.hot_tub_target_setpoint
+# then press button.hot_tub_walk_setpoint_to_target_now to walk the panel to it.
 #
 # CONFIRM these against your install before enabling:
-#   - sensor.solis_grid_exported_power   (Solis MQTT/Modbus integration)
-#   - switch.hot_tub_contactor           (Shelly EM Gen3 relay)
-#   - climate.cabin_hot_tub_climate            (this repo's ESPHome device)
-#   - sensor.cabin_hot_tub_water_temperature   (this repo's ESPHome device)
+#   - sensor.solis_grid_exported_power                 (Solis MQTT/Modbus integration)
+#   - switch.hot_tub_contactor                         (Shelly contactor relay)
+#   - number.hot_tub_target_setpoint                   (this repo's ESPHome device)
+#   - button.hot_tub_walk_setpoint_to_target_now       (this repo's ESPHome device)
+#   - sensor.hot_tub_water_temperature                 (this repo's ESPHome device)
 
 - id: hot_tub_solar_surplus_on
   alias: "Hot Tub: solar surplus ON"
@@ -31,7 +34,7 @@
   condition:
     # Don't reheat if already hot.
     - condition: numeric_state
-      entity_id: sensor.cabin_hot_tub_water_temperature
+      entity_id: sensor.hot_tub_water_temperature
       below: 38
     # Don't try to engage if the contactor is already on (idempotency).
     - condition: state
@@ -48,18 +51,20 @@
       target:
         entity_id: switch.hot_tub_contactor
 
-    # 2. Give the Balboa board time to boot, settle the RS485 bus, and let the
-    #    ESP32 reconnect to HA before issuing climate commands.
+    # 2. Give the Balboa board time to boot and the ESP32 to reconnect to HA
+    #    before driving the panel.
     - delay:
         seconds: 30
 
-    # 3. Set target temp. Climate platform takes °C since we pinned spa_temp_scale: C.
-    - service: climate.set_temperature
+    # 3. Set target setpoint, then walk the panel to it (range 26–40).
+    - service: number.set_value
       target:
-        entity_id: climate.cabin_hot_tub_climate
+        entity_id: number.hot_tub_target_setpoint
       data:
-        temperature: 38
-        hvac_mode: heat
+        value: 38
+    - service: button.press
+      target:
+        entity_id: button.hot_tub_walk_setpoint_to_target_now
 
     # 4. Notify (templated so the message is useful in logs).
     - service: notify.notify
@@ -67,5 +72,5 @@
         title: "Hot tub: heating from solar"
         message: >
           Solar export {{ states('sensor.solis_grid_exported_power') }} W,
-          water at {{ states('sensor.cabin_hot_tub_water_temperature') }} °C.
+          water at {{ states('sensor.hot_tub_water_temperature') }} °C.
           Target 38 °C.

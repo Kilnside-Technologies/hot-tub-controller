@@ -1,54 +1,51 @@
 # Commissioning
 
 Step-by-step from a complete kit on the bench to a working solar-surplus
-automation. Don't skip the bench-side bus sniff in step 1 — it's the
-cheapest way to catch a swapped A+/B− pair or a bad J2 cable.
+automation. Don't skip the bench-side bus sniff in step 1 — it's the cheapest
+way to catch a swapped DATA/CLOCK pair or a bad J2 cable before you commit.
 
 ---
 
-## 1. Sniff the RS485 bus (before flashing)
+## 1. Sniff the display bus (before the production flash)
 
-**Goal**: confirm the Balboa is talking and you've identified the bus
-correctly, with **no** ESP32 in the loop yet.
+**Goal**: confirm the J2 tap is correct and the decoder reads sane values,
+*before* committing the full firmware. The J2 is the **topside display bus**, not
+RS485 — so there's no RS485 dongle here; you flash a bench decoder and read it.
 
 What you need:
-- USB-RS485 dongle (FTDI / CH340-based, dirt cheap)
-- PuTTY (Windows) or `screen` / `picocom` (Linux/macOS)
-- The J2 patch lead you crimped (see [wiring.md](wiring.md))
+- The ESP32 wired to J2 per [wiring.md](wiring.md) (read dividers on GPIO34/35,
+  common GND), powered over **USB** on the bench.
+- A USB cable to the ESP32.
 
 Procedure:
 
-1. Connect the USB-RS485 dongle's A+ to J2 pin 5 (white/blue), B− to J2
-   pin 4 (blue). Leave the +12 V and GND lines disconnected on this end —
-   the dongle is bus-powered from USB.
-2. Plug the J2 patch lead into the Balboa GS501Z. Power up the tub (just
-   the control board, not the heater).
-3. On the PC, open the serial port at **115 200 8N1**. PuTTY → Serial,
-   pick the COM port, baud 115200. Linux: `picocom -b 115200 /dev/ttyUSB0`.
-4. You should see **constant bursts of binary garbage** on screen. That's
-   Balboa frames. If you see nothing, swap A+ and B− and try again
-   (the labels on cheap RS485 dongles lie).
-5. Once you have a data stream, you've confirmed:
-   - The Balboa board is alive and talking.
-   - Your J2 patch lead carries the bus.
-   - The A+ / B− orientation you'll wire to the JZK module.
-
-Unplug everything.
+1. With the ESP32 tapped onto a powered Balboa (control board only, not the
+   heater), flash the USB-only bench decoder over USB:
+   ```bash
+   esphome run esphome/decoder-usb.yaml --device /dev/ttyUSB0
+   ```
+   `decoder-usb.yaml` has no WiFi/secrets — pure serial, made for exactly this.
+2. Watch the logs. Within a few seconds you should see decoded frames and a
+   plausible **water temperature** that matches the topside panel.
+3. If you see nothing or garbage:
+   - Swap **DATA (GPIO34) ↔ CLOCK (GPIO35)** — the classic green/white-green
+     mislabel (see [pinout.md](pinout.md)). Clock is **green** (pin 6).
+   - Check the common **GND** (pin 4) is connected.
+   - Check the 1k/2.2k dividers.
+4. Once the decoder shows correct temperature, the tap is proven. Unplug.
 
 ---
 
-## 2. Verify the data stream is sane (optional but recommended)
+## 2. Deeper frame inspection (optional)
 
-If you want to be sure the bus is Balboa frames and not noise, the
-canonical sniffer is [ccutrer/balboa_worldwide_app](https://github.com/ccutrer/balboa_worldwide_app):
+If decode is flaky and you want to see the raw bus, this repo ships bench tools:
 
-```bash
-gem install balboa_worldwide_app
-bwa_monitor /dev/ttyUSB0
-```
+- `esphome/sniffer.yaml` — streams display-bus activity over WiFi/web.
+- `esphome/rawcap.yaml` — one-flash raw capture (edge rate + frames + raw bits),
+  useful when chasing clock/data framing.
 
-This decodes the live frames into human-readable temps and status. If
-`bwa_monitor` is happy, ESPHome will be too.
+Flash one of those instead of `decoder-usb.yaml` to inspect timing and raw
+frames. If the decoder reads correct temperature, you don't need this.
 
 ---
 
@@ -67,9 +64,12 @@ This decodes the live frames into human-readable temps and status. If
    ...
    [I][api:138]: Boot is done
    ```
+   Then watch for the DS18B20 discovery lines and copy each 64-bit address into
+   the matching `address:` field in `hot-tub.yaml` (see the comments there) so
+   the probes bind stably across reboots.
 5. The device should auto-discover in HA under
    *Settings → Devices & services → ESPHome*. Click "Configure" and accept
-   the API key from `secrets.yaml`.
+   the API key from `secrets.yaml`. Device name is `hot-tub` → entities `hot_tub_*`.
 
 ---
 
@@ -77,26 +77,37 @@ This decodes the live frames into human-readable temps and status. If
 
 In Home Assistant, the following entities should now exist:
 
-| Entity                                    | Expected state           |
-|-------------------------------------------|--------------------------|
-| `sensor.hot_tub_water_temperature`        | a sensible °C value      |
-| `climate.hot_tub_climate`                 | current + target temp    |
-| `binary_sensor.hot_tub_heater_active`     | on/off                   |
-| `binary_sensor.hot_tub_filter_cycle`      | on/off                   |
-| `switch.hot_tub_pump1`                    | on/off, toggleable       |
-| `switch.hot_tub_jets1`                    | on/off, toggleable       |
-| `switch.hot_tub_lights`                   | on/off, toggleable       |
-| `sensor.hot_tub_wifi_signal`              | dBm                      |
-| `sensor.hot_tub_uptime`                   | seconds                  |
+| Entity | Expected state |
+|--------|----------------|
+| `sensor.hot_tub_water_temperature` | a sensible °C value (decoded off the panel) |
+| `sensor.hot_tub_set_temperature` | current setpoint (populates after first Temp press / boot capture) |
+| `number.hot_tub_target_setpoint` | 26–40, your target |
+| `binary_sensor.hot_tub_heater` | on/off |
+| `binary_sensor.hot_tub_pump_motor_running` | on/off |
+| `binary_sensor.hot_tub_light` | on/off |
+| `binary_sensor.hot_tub_blower` | on/off |
+| `binary_sensor.hot_tub_lid_open` | on (open) / off (closed) |
+| `sensor.hot_tub_water_temperature_probe` | DS18B20 bulk water temp |
+| `sensor.hot_tub_ambient_temperature` | DS18B20 outdoor ambient |
+| `sensor.hot_tub_cabinet_temperature` / `_cabinet_humidity` | DHT11 |
+| `sensor.hot_tub_error_code` | fault text (blank when healthy) |
+| `button.hot_tub_press_light` / `_jets` / `_blower` / `_temp` | momentary |
+| `button.hot_tub_walk_setpoint_to_target_now` | momentary |
+| `sensor.hot_tub_wifi_signal` / `_uptime` | diagnostics |
 
-**Cross-check the temperature** against the Balboa topside panel. If the
-ESPHome value is in °F when the panel is °C (or vice versa), check
-`spa_temp_scale` in `esphome/hot-tub.yaml` — for UK installs it must be `C`.
+**Cross-check the temperature** against the Balboa topside panel — the decoder
+reads the panel's own 7-seg digits, so it should match exactly. If they differ,
+the decode is wrong (re-check DATA/CLOCK, see step 1), not a unit-scale setting.
+The displayed unit is just the `UNITS` substitution label in `hot-tub.yaml`.
 
-Toggle a pump from HA and verify it spins up on the tub. If the switch
-flips back to "off" immediately, the Balboa rejected the command — most
-common cause is a bad RS485 wire (works for RX but not TX). Re-seat A+ /
-B− or shorten the lead.
+**Test a button:** press `button.hot_tub_press_jets` in HA and confirm the jets
+react on the tub (and the physical panel still works afterwards). If the panel
+goes unresponsive, the button pins aren't returning to high-impedance idle —
+see the button-write notes in [pinout.md](pinout.md).
+
+**Test the setpoint walk:** set `number.hot_tub_target_setpoint`, press
+`button.hot_tub_walk_setpoint_to_target_now`, and watch `sensor.hot_tub_set_temperature`
+converge to the target over the next few presses.
 
 ---
 
@@ -118,8 +129,9 @@ certified.)
 
 1. Turn the contactor on, turn on a pump (high draw of a few hundred watts).
 2. `sensor.hot_tub_em_power` should track the change within a second.
-3. Disable the pump, enable the heater (climate target > current).
-   Power should jump to ~3050 W. If it reads ~−3050 W, the CT clamp is
+3. Disable the pump, then raise the setpoint above current water temp (set
+   `number.hot_tub_target_setpoint` and press the walk button) so the heater
+   fires. Power should jump to ~3050 W. If it reads ~−3050 W, the CT clamp is
    wired backwards — flip it on the conductor.
 
 ---
@@ -131,7 +143,8 @@ certified.)
 2. Confirm all entity IDs match your install. The placeholders are:
    - `sensor.solis_grid_exported_power`
    - `switch.hot_tub_contactor`
-   - `climate.hot_tub_climate`
+   - `number.hot_tub_target_setpoint`
+   - `button.hot_tub_walk_setpoint_to_target_now`
    - `sensor.hot_tub_water_temperature`
 3. Tune thresholds for your setup:
    - The 2 kW / 5 min ON threshold matches a system that can comfortably
@@ -145,11 +158,12 @@ certified.)
 
 ## 8. Day-two operations
 
-- **Telnet logger**: while the device is in the cabinet and you're
-  debugging, uncomment the `stream_server` block in `esphome/hot-tub.yaml`
-  and reflash OTA. Then `nc <device-ip> 23` from indoors to stream logs.
-  Comment it back out once stable — it pins the UART and consumes RAM.
+- **Live logs / readout**: the device runs a web server — open
+  `http://hot-tub.local/` from the LAN for entity state, or stream logs with
+  `esphome logs esphome/hot-tub.yaml` over the network.
 - **OTA updates**: once the device has an IP, all future updates are
-  `esphome run esphome/hot-tub.yaml` (no `--device` flag).
-- **MQTT consumers**: topics are published under `home/hot_tub/...`.
-  If you wire up an external dashboard, point it at that prefix.
+  `esphome run esphome/hot-tub.yaml` (no `--device` flag). Note that OTA must
+  come from a host that can reach the device's VLAN.
+- **Setpoint after boot**: the firmware fires one Temp press ~45 s after boot to
+  reveal the current setpoint (otherwise `set_temperature` stays unknown until
+  someone interacts), and refreshes it every 30 min.

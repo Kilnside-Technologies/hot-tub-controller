@@ -2,19 +2,24 @@
 #
 # Drop this into a `cards:` list on an existing Lovelace view, or wrap as a
 # standalone view in your dashboard YAML. Entity IDs assume:
-#   - ESPHome device `hot-tub` renamed in HA to "Cabin Hot Tub" => entities
-#     prefixed `cabin_hot_tub_*`. sensor.cabin_hot_tub_water_temperature is
-#     the template sensor defined in ../sensors/hot_tub.yaml (the ESPHome
-#     balboa_spa component doesn't expose water temp natively).
+#   - ESPHome device `hot-tub` => entities prefixed `hot_tub_*`. Water temp is
+#     exposed natively (sensor.hot_tub_water_temperature, decoded off the panel
+#     display bus) — no template sensor needed.
 #   - Shelly EM Gen3 named `hot_tub_em` => sensor.hot_tub_em_power, _energy
+#   - Shelly contactor relay => switch.hot_tub_contactor
 #   - Solis integration => sensor.solis_grid_exported_power
 # CONFIRM all entity IDs against your install.
+#
+# Control model: there is no climate entity. Set the target via
+# number.hot_tub_target_setpoint, then press button.hot_tub_walk_setpoint_to_target_now
+# to walk the panel to it. Pump/light/blower are read-only state (binary_sensor)
+# plus momentary press buttons.
 
 type: vertical-stack
 cards:
   # Current water temperature — at-a-glance gauge.
   - type: gauge
-    entity: sensor.cabin_hot_tub_water_temperature
+    entity: sensor.hot_tub_water_temperature
     name: Water temperature
     unit: "°C"
     min: 20
@@ -25,27 +30,73 @@ cards:
       yellow: 36    # 36–40 °C - sweet spot
       red: 40       # > 40 °C  - hot / cap
 
-  # Target temperature & mode.
-  - type: thermostat
-    entity: climate.cabin_hot_tub_climate
-    name: Hot tub target
+  # Setpoint control — set the target, then press Walk to apply it.
+  - type: entities
+    title: Setpoint
+    state_color: true
+    entities:
+      - entity: number.hot_tub_target_setpoint
+        name: Target
+      - entity: button.hot_tub_walk_setpoint_to_target_now
+        name: Apply (walk to target)
+      - entity: sensor.hot_tub_set_temperature
+        name: Panel setpoint (readback)
 
-  # Live state — pump, light, heater, circulation, filter.
+  # Live state — read-only, decoded off the display bus.
   - type: glance
     title: State
     show_state: true
     columns: 5
     entities:
-      - entity: binary_sensor.cabin_hot_tub_heater_active
+      - entity: binary_sensor.hot_tub_heater
         name: Heater
-      - entity: switch.cabin_hot_tub_pump_1
+      - entity: binary_sensor.hot_tub_pump_motor_running
         name: Pump
-      - entity: light.cabin_hot_tub_lights
-        name: Lights
-      - entity: binary_sensor.cabin_hot_tub_circulation_pump
-        name: Circ.
-      - entity: binary_sensor.cabin_hot_tub_filter_cycle_1
-        name: Filter
+      - entity: binary_sensor.hot_tub_light
+        name: Light
+      - entity: binary_sensor.hot_tub_blower
+        name: Blower
+      - entity: binary_sensor.hot_tub_lid_open
+        name: Lid
+
+  # Panel buttons — momentary presses injected over the display bus.
+  - type: horizontal-stack
+    cards:
+      - type: button
+        name: Light
+        entity: button.hot_tub_press_light
+        tap_action:
+          action: toggle
+      - type: button
+        name: Jets
+        entity: button.hot_tub_press_jets
+        tap_action:
+          action: toggle
+      - type: button
+        name: Blower
+        entity: button.hot_tub_press_blower
+        tap_action:
+          action: toggle
+      - type: button
+        name: Temp
+        entity: button.hot_tub_press_temp
+        tap_action:
+          action: toggle
+
+  # Environment — probe water temp + ambient + cabinet.
+  - type: entities
+    title: Environment
+    entities:
+      - entity: sensor.hot_tub_water_temperature_probe
+        name: Water (probe)
+      - entity: sensor.hot_tub_ambient_temperature
+        name: Ambient
+      - entity: sensor.hot_tub_cabinet_temperature
+        name: Cabinet temp
+      - entity: sensor.hot_tub_cabinet_humidity
+        name: Cabinet humidity
+      - entity: sensor.hot_tub_error_code
+        name: Error code
 
   # Power & energy + contactor + solar export context.
   - type: entities
@@ -69,5 +120,7 @@ cards:
     hours_to_show: 24
     refresh_interval: 60
     entities:
-      - entity: sensor.cabin_hot_tub_water_temperature
+      - entity: sensor.hot_tub_water_temperature
         name: Water
+      - entity: sensor.hot_tub_set_temperature
+        name: Setpoint
