@@ -27,6 +27,23 @@
 #   pin 8 (brown)       -> GPIO17      Temp button
 #   pin 1 (white/orange, +5V) -> NOT CONNECTED
 #
+# 1-Wire DS18B20 temperature sensors (water + ambient):
+#   GPIO32              -> shared DATA bus (4.7 kΩ pull-up to 3.3V required)
+#   Both sensors wire in parallel: VCC -> 3.3V, GND -> GND, DATA -> GPIO32.
+#   Sensors auto-discovered by unique 64-bit serial; addresses pasted below
+#   after first boot logs them. Use waterproof stainless-probe versions for
+#   the ambient (cabinet-exterior, exposed to weather) and water sensors.
+#
+# DHT11 cabinet temp/humidity sensor (NB: "DHT one-wire" ≠ Dallas 1-Wire):
+#   VCC -> 3.3V, GND -> GND, DATA -> GPIO13. Most DHT11 modules carry an
+#   on-board pull-up; if you have a bare 3-pin part, add 4.7–10 kΩ to 3.3V.
+#
+# Reed switch — hot tub lid open/close detector:
+#   One terminal -> GPIO14 (internal pull-up enabled in software).
+#   Other terminal -> GND. Magnet on the lid, reed body on the cabinet rim
+#   so closing the lid brings them together (= contact closed = line LOW =
+#   lid CLOSED). Open lid = line HIGH = HA reports "Open".
+#
 # Button output pins use ESPHome's `output: platform: gpio` which configures
 # them as OUTPUT LOW at boot. To "press" a button, drive HIGH for ~80 ms,
 # then back to LOW. Current is ≤3.3 mA through the 1 kΩ resistor — well
@@ -86,6 +103,16 @@ external_components:
       type: local
       path: components
 
+# ===== 1-Wire bus for DS18B20 temp sensors (water + ambient) =====
+# After first flash, check the logs for lines like:
+#   [I][dallas_temp:...]: 'Water Temp (probe)': Found device 0x...
+# Copy each discovered 64-bit address into the matching `address:` field below
+# so the right physical probe maps to the right HA entity (without an address
+# the binding is order-of-enumeration and can swap on reboot).
+one_wire:
+  - platform: gpio
+    pin: GPIO32
+
 # ===== Display-bus decode (read-only) =====
 sensor:
   - platform: inputs
@@ -102,6 +129,34 @@ sensor:
       unit_of_measurement: "°${UNITS}"
       accuracy_decimals: 0
       device_class: temperature
+  # Independent water-temp probe — bulk water reading, not the manifold the
+  # Balboa panel sees. Used for UA estimation in the heating experiment.
+  - platform: dallas_temp
+    # address: 0x0000000000000000   # TODO fill in from boot log after first flash
+    name: "Water Temperature (probe)"
+    id: ext_water_temp
+    update_interval: 30s
+    accuracy_decimals: 1
+  # Outdoor ambient near the tub — heat-loss driver for UA modelling.
+  - platform: dallas_temp
+    # address: 0x0000000000000000   # TODO fill in from boot log after first flash
+    name: "Ambient Temperature"
+    id: ext_ambient_temp
+    update_interval: 30s
+    accuracy_decimals: 1
+  # Cabinet temp + humidity (DHT11 — ±2°C / ±5%RH, treat as indicative only).
+  - platform: dht
+    pin: GPIO13
+    model: DHT11
+    update_interval: 30s
+    temperature:
+      name: "Cabinet Temperature"
+      id: cabinet_temp
+      accuracy_decimals: 1
+    humidity:
+      name: "Cabinet Humidity"
+      id: cabinet_humidity
+      accuracy_decimals: 0
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 60s
@@ -131,6 +186,23 @@ binary_sensor:
     type: blower
     name: "Blower"
     id: balboa_blower
+  # Hot tub lid open/close — reed switch on GPIO14, other side to GND.
+  # Normally-open reed + internal pull-up: magnet present (lid closed) =
+  # contact closed = pin LOW = HA "off" = Closed. Magnet absent (lid open)
+  # = pin HIGH (pull-up) = HA "on" = Open. Matches device_class: opening.
+  - platform: gpio
+    name: "Lid Open"
+    id: lid_open
+    device_class: opening
+    pin:
+      number: GPIO14
+      mode:
+        input: true
+        pullup: true
+    filters:
+      # Debounce: reed bounce on close + lid wobble on open
+      - delayed_on: 50ms
+      - delayed_off: 50ms
 
 text_sensor:
   - platform: inputs
