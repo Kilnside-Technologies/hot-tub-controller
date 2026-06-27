@@ -1,5 +1,10 @@
 # Hot tub pre-heat script
 #
+# 🚧 PROPOSED / NOT INSTALLED. Engages a Shelly contactor
+# (switch.hot_tub_contactor) that is NOT fitted. The mains-control use case
+# hasn't been firmed — reference only; don't enable yet. (The setpoint walk
+# itself works on the current setup, but this script also drives the contactor.)
+#
 # Compute when to start heating so the tub reaches `target_temp` by
 # `ready_by_time`, based on:
 #   - current water temperature (sensor.hot_tub_water_temperature)

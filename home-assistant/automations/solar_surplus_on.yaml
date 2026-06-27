@@ -1,5 +1,10 @@
 # Solar surplus -> hot tub ON
 #
+# 🚧 PROPOSED / NOT INSTALLED. Depends on a Shelly contactor
+# (switch.hot_tub_contactor) that is NOT fitted, for a solar-surplus
+# heater-control use case that hasn't been firmed — it may be achievable with
+# the display-bus setpoint control alone. Reference only; don't enable yet.
+#
 # Drop into a packages: file, or copy into automations.yaml under the
 # automation: list. Entity IDs below assume the ESPHome device `hot-tub`
 # (HA entities `hot_tub_*`) and a Shelly contactor relay `hot_tub_contactor`.

@@ -111,7 +111,14 @@ converge to the target over the next few presses.
 
 ---
 
-## 5. Test the contactor manually
+> 🚧 **Steps 5–7 are PROPOSED / NOT INSTALLED.** They cover the Shelly contactor +
+> Shelly EM + solar-surplus automations, which are not fitted and reference
+> entities that don't exist yet (`switch.hot_tub_contactor`, `sensor.hot_tub_em_power`).
+> The solar-surplus heater-control use case hasn't been firmed — it may be doable
+> with the display-bus setpoint control alone. Skip 5–7 unless/until that's decided
+> and the hardware is in.
+
+## 5. Test the contactor manually (proposed)
 
 (Skip until the mains wiring in [wiring.md](wiring.md) step 2 is done and
 certified.)

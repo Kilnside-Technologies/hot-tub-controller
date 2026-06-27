@@ -1,5 +1,9 @@
 # Solar surplus -> hot tub OFF
 #
+# 🚧 PROPOSED / NOT INSTALLED. Depends on a Shelly contactor
+# (switch.hot_tub_contactor) that is NOT fitted, for a solar-surplus use case
+# that hasn't been firmed. Reference only; don't enable yet.
+#
 # Pair to solar_surplus_on.yaml. Drop the target to its floor first (so the
 # heater stops drawing before we cut mains, avoiding contactor arcing under
 # load), wait, then de-energise the contactor.

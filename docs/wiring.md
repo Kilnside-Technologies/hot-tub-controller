@@ -87,8 +87,13 @@ Common pattern:
 
 ---
 
-## 2. Mains — Shelly EM Gen3 + contactor
+## 2. Mains — Shelly EM Gen3 + contactor (PROPOSED — not installed)
 
+> 🚧 **PROPOSED / NOT INSTALLED.** No Shelly or contactor is fitted. The
+> solar-surplus heater-shedding use case hasn't been firmed up — it may be
+> achievable with the display-bus setpoint control alone (no contactor at all).
+> Everything below is a design reference, not a current install.
+>
 > ⚠️ **UK Part P notifiable work.** If you are not a competent person under
 > BS 7671, hire one. Have the install certified.
 
