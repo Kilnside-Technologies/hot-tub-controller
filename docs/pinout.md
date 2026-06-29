@@ -51,11 +51,11 @@ back, hidden) — **pin 1 is on the far left**, pin 8 on the far right.
 | GPIO4 | **Jets** button (write) | J2 pin 3 (white/green) via 1 kΩ |
 | GPIO16 | **Blower** button (write) | J2 pin 7 (white/brown) via 1 kΩ |
 | GPIO17 | **Temp** button (write) | J2 pin 8 (brown) via 1 kΩ |
-| GPIO32 | 1-Wire DS18B20 ×2 (water + ambient) | shared data, 4.7 kΩ pull-up to 3V3 |
+| GPIO32 | 1-Wire DS18B20 (water; ambient disabled until probe #2 is wired) | shared data, 4.7 kΩ pull-up to 3V3 |
 | GPIO13 | DHT11 cabinet temp/humidity | data (most modules carry their own pull-up) |
 | GPIO14 | Reed lid switch | other side to GND; internal pull-up in software |
 | GND | Common ground | J2 pin 4 (blue) + divider GND rail + all sensors |
-| 5V/VIN | Power (untethered only) | J2 pin 1 (white/orange) — **never with USB at the same time** |
+| 5V/VIN | Power (untethered, parasitic) | J2 pin 1 (white/orange). Spa SMPS browns out under WiFi spikes — fit VIN decoupling caps (2×1000µF + 2×100nF), see wiring.md / NOTES.md. **Never with USB at the same time.** |
 | USB | Power + flash + logs | bench / OTA |
 
 GPIO34/35 are **input-only** (no internal pull-ups — the divider sets the level)

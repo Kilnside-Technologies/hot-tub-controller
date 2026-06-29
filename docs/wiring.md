@@ -35,9 +35,10 @@ is the install procedure.
         pin 7  Blower─[1k]──────────────────────► GPIO16
         pin 8  Temp  ─[1k]──────────────────────► GPIO17
 
-                 ┌──────────────┐  + DS18B20 ×2  → GPIO32 (4.7k pull-up to 3V3)
-                 │   ESP32       │  + DHT11       → GPIO13
-                 │  WROOM-32E    │  + reed (lid)  → GPIO14 ↔ GND
+                 ┌──────────────┐  + DS18B20 ×1 water → GPIO32 (4.7k pull-up to 3V3)
+                 │   ESP32       │  + DHT11           → GPIO13
+                 │  WROOM-32E    │  + reed (lid)      → GPIO14 ↔ GND
+                 │  +VIN decoupl │  + 2×1000µF + 2×100nF at VIN (brownout, see step 5)
                  └──────────────┘
 ```
 
@@ -60,12 +61,32 @@ is the install procedure.
    - pin 8 (brown) → 1k → **GPIO17** (Temp)
 4. **Wire ground:** pin 4 (blue) → ESP32 GND, and tie the divider GND rail to
    the same point. A solid common ground is mandatory.
-5. **Power:** on the bench, power the ESP32 over **USB** (flash + logs). For the
-   untethered install, wire pin 1 (white/orange, +5 V) → ESP32 **5V/VIN**.
+5. **Power + decoupling.** On the bench, power over **USB** (flash + logs). In
+   the cabinet the ESP is **parasitically powered from J2 pin 1 (+5 V)** → ESP
+   **5V/VIN**. ⚠️ The spa's internal 5 V SMPS is sized for the panel
+   (~50–100 mA) and is overloaded by the ESP's WiFi spikes (200–500 mA) →
+   boot brownouts at the 2.43 V detector. The firmware already trims WiFi
+   current (`output_power: 14dB`, `fast_connect`, `power_save_mode: light`);
+   on the hardware side **fit decoupling caps at VIN**:
+   - **2× 1000 µF** low-ESR electrolytic + **2× 100 nF** X7R ceramic, split
+     across two points on the VIN/GND rail (≤25 mm leads, each 100 nF right
+     beside its 1000 µF). Optional **1 Ω 0.5 W** inrush limiter in series from
+     J2 +5 V *only if* the ESP won't start with the caps fitted. Every cap
+     ground shares the **same node as J2 pin 4**.
+     ```
+     J2 +5V ──[opt 1Ω]──┬───────────┬── ESP VIN
+                       1000µF      1000µF
+                       +100nF      +100nF
+     J2 GND ────────────┴───────────┴── ESP GND   (= J2 pin 4 node)
+     ```
+   - **Long-term fix** (see `NOTES.md`): drop J2 pin 1, run a small dedicated
+     5 V PSU, keep J2 pin 4 GND tied as the common signal reference.
    **Never have USB and the J2 +5 V connected at the same time** (back-feed).
 6. **Sensors (in the firmware, wire if fitted):**
-   - DS18B20 ×2 (water + ambient): data → **GPIO32** with a 4.7 kΩ pull-up to
-     3V3; VCC → 3V3, GND → GND. Both probes share the one bus.
+   - DS18B20 water probe: data → **GPIO32** with a 4.7 kΩ pull-up to 3V3;
+     VCC → 3V3, GND → GND. (The firmware's *ambient* DS18B20 is currently
+     **disabled** — only one probe is wired; otherwise both entries bind to the
+     same sensor. Re-enable + pin both addresses once probe #2 is on the bus.)
    - DHT11 (cabinet): data → **GPIO13**, VCC → 3V3, GND → GND.
    - Reed lid switch: one side → **GPIO14**, other → GND (internal pull-up in
      software; magnet on the lid, reed body on the cabinet rim).

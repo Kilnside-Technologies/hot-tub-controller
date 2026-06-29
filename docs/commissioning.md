@@ -88,7 +88,7 @@ In Home Assistant, the following entities should now exist:
 | `binary_sensor.hot_tub_blower` | on/off |
 | `binary_sensor.hot_tub_lid_open` | on (open) / off (closed) |
 | `sensor.hot_tub_water_temperature_probe` | DS18B20 bulk water temp |
-| `sensor.hot_tub_ambient_temperature` | DS18B20 outdoor ambient |
+| `sensor.hot_tub_ambient_temperature` | **disabled** until a 2nd DS18B20 is wired |
 | `sensor.hot_tub_cabinet_temperature` / `_cabinet_humidity` | DHT11 |
 | `sensor.hot_tub_error_code` | fault text (blank when healthy) |
 | `button.hot_tub_press_light` / `_jets` / `_blower` / `_temp` | momentary |
