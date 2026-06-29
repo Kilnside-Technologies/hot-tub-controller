@@ -150,16 +150,16 @@ class HotTubDisplaySensor : public esphome::Component, public esphome::sensor::S
 
 
   
-  // Decode temperature from p1, p2, p3
-  // p2 = tens digit, p3 = ones digit, bits 5&4 of p1 both high = add 100
-  static int16_t decode_temp(uint8_t p1, int8_t d2, int8_t d3) {
+  // Decode temperature from p2 (tens digit) and p3 (ones digit).
+  // p1 is the status byte (bit2 = heater); no documented "hundreds indicator"
+  // exists in the GS501Z protocol (see docs/HANDOFF.md, docs/pinout.md).
+  // Older upstream Balboa code had a "+100 if p1 bits 5&4 both set" Fahrenheit
+  // hundreds-indicator branch — that doesn't apply to this controller and was
+  // observed in production firing spuriously on a noise-flip of those p1 bits,
+  // producing a 100°C reading from a real "00" display. Removed 2026-06-27.
+  static int16_t decode_temp(uint8_t /*p1*/, int8_t d2, int8_t d3) {
     if (d2 < 0 || d3 < 0) return -1;  // invalid digits
-    int16_t temp = d2 * 10 + d3;
-    // Check bits 5 and 4 of p1 (0b00110000 = 0x30)
-    if ((p1 & 0x30) == 0x30) {
-      temp += 100;
-    }
-    return temp;
+    return d2 * 10 + d3;
   }
   static int8_t decode_7seg(uint8_t seg) {
     // bit ordering: bit6=a(top), bit5=b(upper right), bit4=c(lower right), bit3=d(bottom), bit2=e(lower left), bit1=f(upper left), bit0=g(middle)

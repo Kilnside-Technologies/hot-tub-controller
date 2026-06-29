@@ -18,6 +18,7 @@
 # the API encryption key to paste is the value of `api_key` in secrets.yaml.
 #
 # WIRING (568B, each tap via 1 kΩ–2.2 kΩ series resistor):
+#   pin 1 (white/orange, +5V) -> ESP VIN  (parasitic power, see brownout notes)
 #   pin 4 (blue)        -> ESP GND     (mandatory common ref)
 #   pin 5 (white/blue)  -> GPIO34      DATA (input-only)
 #   pin 6 (green)       -> GPIO35      CLOCK (input-only)
@@ -25,7 +26,14 @@
 #   pin 3 (white/green) -> GPIO4       Jets button
 #   pin 7 (white/brown) -> GPIO16      Blower button
 #   pin 8 (brown)       -> GPIO17      Temp button
-#   pin 1 (white/orange, +5V) -> NOT CONNECTED
+#
+# J2 pin 1 (+5V) parasitic-power CAVEAT: the Balboa's internal SMPS that drives
+# this rail is sized for the panel display (~50-100 mA) and is BADLY overloaded
+# by the ESP's WiFi association spikes (~250+ mA at default TX power), causing
+# boot-time brownouts. Mitigation in this YAML: `wifi: output_power: 14dB` etc.
+# below. Long-term fix: disconnect J2 pin 1 and run a proper aux 5V PSU,
+# keeping J2 pin 4 GND tied for the common signal reference. See
+# project_hot_tub_brownouts memory for the full plan.
 #
 # 1-Wire DS18B20 temperature sensors (water + ambient):
 #   GPIO32              -> shared DATA bus (4.7 kΩ pull-up to 3.3V required)
@@ -76,6 +84,27 @@ esp32:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # Boot-current trimming (added 2026-06-28). ESP32 is parasitically powered
+  # from the Balboa J2 pin 1 (+5V) line — a tiny SMPS inside the spa controller
+  # sized for the panel display (~100 mA) and badly overloaded by the ESP's
+  # WiFi-association current spikes (≥250 mA at default 20 dBm), producing
+  # boot-time brownouts at the 2.43V detector threshold. Three knobs here cut
+  # the spike; each is reversible if signal quality degrades.
+  #
+  # 1. `output_power: 14dB` (= 25 mW) drops association-burst current from
+  #    ~250 mA to ~150 mA. Signal at the bench cabinet has measured -49 dBm
+  #    (≥25 dB fade margin) so dropping to 14 dBm leaves ~19 dB — still
+  #    healthy. Tune again once the final perfboard/enclosure is in place,
+  #    since the cabinet metalwork can swing this 15-20 dB.
+  # 2. `fast_connect: true` skips the network scan on boot; reaches API ~3 s
+  #    sooner. Safe for a fixed home AP; falls back gracefully if AP roams.
+  # 3. `power_save_mode: light` drops idle current ~80 mA → ~20 mA between
+  #    TX bursts, so the on-board decoupling holds longer between spikes.
+  #    Trade-off: a few-ms latency on incoming API messages — imperceptible
+  #    for button presses.
+  output_power: 14dB
+  fast_connect: true
+  power_save_mode: light
   ap:
     ssid: "hot-tub-fallback"
     password: !secret ota_password
@@ -89,6 +118,16 @@ api:
 ota:
   - platform: esphome
     password: !secret ota_password
+
+# Relaxed safe_mode rollback. The dormant-cycle supply transitions cause
+# transient brownouts (PSU sag during WiFi TX bursts on top of marginal
+# supply); at default `num_attempts: 10` + `boot_is_good_after: 60s`,
+# new firmware kept getting rolled back to the previous partition before
+# it could commit. With 100 attempts and a 5s commit window, the device
+# survives the brownout chain so OTA changes actually stick.
+safe_mode:
+  num_attempts: 100
+  boot_is_good_after: 5s
 
 logger:
   level: INFO
@@ -138,12 +177,17 @@ sensor:
     update_interval: 30s
     accuracy_decimals: 1
   # Outdoor ambient near the tub — heat-loss driver for UA modelling.
-  - platform: dallas_temp
-    # address: 0x0000000000000000   # TODO fill in from boot log after first flash
-    name: "Ambient Temperature"
-    id: ext_ambient_temp
-    update_interval: 30s
-    accuracy_decimals: 1
+  # DISABLED until the second DS18B20 is physically wired. With no address
+  # pinned and only one device on the bus, ESPHome bound BOTH entries to
+  # the same physical sensor (ambient just mirrored water). Re-enable when
+  # sensor #2 is on the bus and pin addresses on both blocks so the binding
+  # is stable. Will need a logger.level: DEBUG flash to discover addresses.
+  # - platform: dallas_temp
+  #   # address: 0x0000000000000000   # TODO fill in from boot log
+  #   name: "Ambient Temperature"
+  #   id: ext_ambient_temp
+  #   update_interval: 30s
+  #   accuracy_decimals: 1
   # Cabinet temp + humidity (DHT11 — ±2°C / ±5%RH, treat as indicative only).
   - platform: dht
     pin: GPIO13
